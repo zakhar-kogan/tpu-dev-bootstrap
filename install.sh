@@ -777,12 +777,34 @@ generate_share_ssh_key() {
     run ssh-keygen -t ed25519 -N "" -C "$SHARE_SSH_USER@tpu-dev-$ENV_NAME" -f "$SHARE_SSH_KEY_PATH"
   fi
   if [[ "$DRY_RUN" != "yes" && -f "$SHARE_SSH_KEY_PATH.pub" ]]; then
-    log "Adding shareable SSH public key to local authorized_keys"
-    mkdir -p "$HOME/.ssh"
-    chmod 700 "$HOME/.ssh"
-    touch "$HOME/.ssh/authorized_keys"
-    chmod 600 "$HOME/.ssh/authorized_keys"
-    grep -qxF "$(cat "$SHARE_SSH_KEY_PATH.pub")" "$HOME/.ssh/authorized_keys" || cat "$SHARE_SSH_KEY_PATH.pub" >> "$HOME/.ssh/authorized_keys"
+    # Resolve the target user's home directory. When --share-ssh-user differs
+    # from $USER (e.g. "ubuntu") the key must go into *their* authorized_keys,
+    # not the installer user's.
+    local target_home
+    target_home="$(getent passwd "$SHARE_SSH_USER" 2>/dev/null | cut -d: -f6 || true)"
+    if [[ -z "$target_home" ]]; then
+      warn "Could not resolve home for user '$SHARE_SSH_USER'; falling back to $HOME"
+      target_home="$HOME"
+    fi
+    local target_auth="$target_home/.ssh/authorized_keys"
+    log "Adding shareable SSH public key to $target_auth"
+    if [[ "$SHARE_SSH_USER" != "$USER" ]]; then
+      # Need elevated permissions to write to another user's .ssh directory.
+      sudo mkdir -p "$target_home/.ssh"
+      sudo chmod 700 "$target_home/.ssh"
+      sudo touch "$target_auth"
+      sudo chmod 600 "$target_auth"
+      grep -qxF "$(cat "$SHARE_SSH_KEY_PATH.pub")" "$target_auth" 2>/dev/null \
+        || cat "$SHARE_SSH_KEY_PATH.pub" | sudo tee -a "$target_auth" >/dev/null
+      sudo chown -R "$SHARE_SSH_USER:" "$target_home/.ssh"
+    else
+      mkdir -p "$target_home/.ssh"
+      chmod 700 "$target_home/.ssh"
+      touch "$target_auth"
+      chmod 600 "$target_auth"
+      grep -qxF "$(cat "$SHARE_SSH_KEY_PATH.pub")" "$target_auth" \
+        || cat "$SHARE_SSH_KEY_PATH.pub" >> "$target_auth"
+    fi
   fi
 }
 
