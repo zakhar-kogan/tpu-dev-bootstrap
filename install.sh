@@ -819,18 +819,16 @@ generate_share_ssh_key() {
 }
 
 print_share_ssh_instructions() {
+  # Only generates the worker helper script; display is handled by print_summary.
   [[ "$GENERATE_SHARE_SSH_KEY" == "yes" ]] || return 0
   local pubkey_file="$SHARE_SSH_KEY_PATH.pub"
   local command_file="$SHARE_SSH_KEY_PATH.add-to-tpu.sh"
   local ssh_target="${TPU_NAME:-<TPU_NAME>}"
   local ssh_zone="${GCP_ZONE:-<ZONE>}"
-  local ssh_host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
   local project_arg=""
   local public_key_text="<PUBLIC_KEY>"
   [[ -n "$GCP_PROJECT" ]] && project_arg=" --project=$GCP_PROJECT"
-  if [[ -f "$pubkey_file" ]]; then
-    public_key_text="$(cat "$pubkey_file")"
-  fi
+  [[ -f "$pubkey_file" ]] && public_key_text="$(cat "$pubkey_file")"
   if [[ "$DRY_RUN" != "yes" && -f "$pubkey_file" ]]; then
     cat > "$command_file" <<EOF_CMD
 #!/usr/bin/env bash
@@ -838,16 +836,6 @@ set -Eeuo pipefail
 gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone --worker=all --command 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF "$public_key_text" ~/.ssh/authorized_keys 2>/dev/null || printf "%s\n" "$public_key_text" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
 EOF_CMD
     chmod 700 "$command_file"
-  fi
-  printf '\n%s\n' "$SEP"
-  printf '🔑  Shareable SSH key\n\n'
-  printf '  private:  %s\n' "$SHARE_SSH_KEY_PATH"
-  printf '  share:    cat %s\n' "$SHARE_SSH_KEY_PATH"
-  printf '  connect:  ssh -i ./%s -o IdentitiesOnly=yes -p %s %s@%s\n' \
-    "$(basename "$SHARE_SSH_KEY_PATH")" "$SSH_PORT" "$SHARE_SSH_USER" "$ssh_host"
-  printf '  revoke:   remove its line from ~/.ssh/authorized_keys on the VM\n'
-  if [[ -f "$command_file" ]]; then
-    printf '  workers:  %s  (adds key to all TPU workers)\n' "$command_file"
   fi
 }
 
@@ -875,11 +863,14 @@ print_summary() {
   printf '🔑  SSH\n\n'
   printf '  gcloud:  gcloud compute tpus tpu-vm ssh %s %s --zone=%s\n' \
     "$ssh_target" "$project_flag" "$ssh_zone"
-  if [[ "$GENERATE_SHARE_SSH_KEY" == "yes" ]]; then
-    local ssh_host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
+  # Show key info if key was just generated OR if one already exists on disk.
+  local ssh_host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
+  if [[ -f "$SHARE_SSH_KEY_PATH" ]]; then
     printf '  direct:  ssh -i %s -o IdentitiesOnly=yes -p %s %s@%s\n' \
       "$SHARE_SSH_KEY_PATH" "$SSH_PORT" "$SHARE_SSH_USER" "$ssh_host"
     printf '  key:     cat %s\n' "$SHARE_SSH_KEY_PATH"
+    local command_file="$SHARE_SSH_KEY_PATH.add-to-tpu.sh"
+    [[ -f "$command_file" ]] && printf '  workers: %s\n' "$command_file"
   fi
 
   # ── JupyterLab ─────────────────────────────────────────────────
