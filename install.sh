@@ -839,103 +839,81 @@ gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone --worker
 EOF_CMD
     chmod 700 "$command_file"
   fi
-  cat <<EOF
-
-🔑 Shareable SSH key
-  private key: $SHARE_SSH_KEY_PATH
-  public key:  $pubkey_file
-  add command: $command_file
-
-The public key has been added to this VM's ~/.ssh/authorized_keys.
-If you need to authorize it on all TPU workers, run:
-
-  $command_file
-
-Copy or transfer the private key:
-
-  cat $SHARE_SSH_KEY_PATH
-  scp $SHARE_SSH_KEY_PATH collaborator@host:~/Downloads/
-
-Send collaborators the private key file plus this plain SSH command, no gcloud
-needed:
-
-  chmod 600 ./$(basename "$SHARE_SSH_KEY_PATH")
-  ssh -i ./$(basename "$SHARE_SSH_KEY_PATH") -o IdentitiesOnly=yes -p $SSH_PORT $SHARE_SSH_USER@$ssh_host
-
-Owner gcloud SSH command, if needed:
-
-  gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone --ssh-key-file=$SHARE_SSH_KEY_PATH
-
-Share the private key only with people you trust. Remove the matching line from
-~/.ssh/authorized_keys on the TPU VM to revoke access.
-EOF
-}
-
-print_marimo_summary() {
-  [[ "$ENABLE_MARIMO" == "yes" ]] || return 0
-  local host="127.0.0.1"
-  if [[ "$PUBLIC_JUPYTER" == "yes" ]]; then
-    host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
+  printf '\n%s\n' "$SEP"
+  printf '🔑  Shareable SSH key\n\n'
+  printf '  private:  %s\n' "$SHARE_SSH_KEY_PATH"
+  printf '  share:    cat %s\n' "$SHARE_SSH_KEY_PATH"
+  printf '  connect:  ssh -i ./%s -o IdentitiesOnly=yes -p %s %s@%s\n' \
+    "$(basename "$SHARE_SSH_KEY_PATH")" "$SSH_PORT" "$SHARE_SSH_USER" "$ssh_host"
+  printf '  revoke:   remove its line from ~/.ssh/authorized_keys on the VM\n'
+  if [[ -f "$command_file" ]]; then
+    printf '  workers:  %s  (adds key to all TPU workers)\n' "$command_file"
   fi
-  cat <<EOF
-
-🧩 Marimo
-Service:
-
-  systemctl --user status tpu-marimo.service
-  journalctl --user -u tpu-marimo.service -f
-
-Public URL:
-
-  http://$host:$MARIMO_PORT/?access_token=$MARIMO_TOKEN
-
-SSH tunnel fallback:
-
-  gcloud compute tpus tpu-vm ssh ${TPU_NAME:-<TPU_NAME>}${GCP_PROJECT:+ --project=$GCP_PROJECT} --zone=${GCP_ZONE:-<ZONE>} -- -L $MARIMO_PORT:127.0.0.1:$MARIMO_PORT
-
-  http://127.0.0.1:$MARIMO_PORT/?access_token=$MARIMO_TOKEN
-EOF
 }
+
+
+SEP="────────────────────────────────────────────────────────"
+
+print_marimo_summary() { :; }  # merged into print_summary
 
 print_summary() {
-  local host="127.0.0.1"
-  if [[ "$PUBLIC_JUPYTER" == "yes" ]]; then
-    host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
-  fi
+  local jlab_host="127.0.0.1"
+  local marimo_host="127.0.0.1"
+  [[ "$PUBLIC_JUPYTER" == "yes" ]] && jlab_host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
+  [[ "$PUBLIC_MARIMO"  == "yes" ]] && marimo_host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
+
   local ssh_target="${TPU_NAME:-<TPU_NAME>}"
   local ssh_zone="${GCP_ZONE:-<ZONE>}"
-  local project_arg=""
-  [[ -n "$GCP_PROJECT" ]] && project_arg=" --project=$GCP_PROJECT"
-  cat <<EOF
+  local project_flag="${GCP_PROJECT:+--project=$GCP_PROJECT}"
 
-✅ Done
+  printf '\n%s\n' "$SEP"
+  printf '✅  Done  ·  env: %s\n' "$ENV_DIR"
+  printf '         ·  secrets: %s\n' "$SECRETS_FILE"
 
-📦 Environment
-  $ENV_DIR
+  # ── SSH ────────────────────────────────────────────────────────
+  printf '\n%s\n' "$SEP"
+  printf '🔑  SSH\n\n'
+  printf '  gcloud:  gcloud compute tpus tpu-vm ssh %s %s --zone=%s\n' \
+    "$ssh_target" "$project_flag" "$ssh_zone"
+  if [[ "$GENERATE_SHARE_SSH_KEY" == "yes" ]]; then
+    local ssh_host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
+    printf '  direct:  ssh -i %s -o IdentitiesOnly=yes -p %s %s@%s\n' \
+      "$SHARE_SSH_KEY_PATH" "$SSH_PORT" "$SHARE_SSH_USER" "$ssh_host"
+    printf '  key:     cat %s\n' "$SHARE_SSH_KEY_PATH"
+  fi
 
-🧪 JupyterLab
-Service:
+  # ── JupyterLab ─────────────────────────────────────────────────
+  if [[ "$ENABLE_JUPYTER" == "yes" ]]; then
+    printf '\n%s\n' "$SEP"
+    printf '🧪  JupyterLab\n\n'
+    printf '  url:     http://%s:%s/lab?token=%s\n' "$jlab_host" "$JUPYTER_PORT" "$JUPYTER_TOKEN"
+    if [[ "$PUBLIC_JUPYTER" == "yes" ]]; then
+      printf '  tunnel:  gcloud compute tpus tpu-vm ssh %s %s --zone=%s -- -L %s:127.0.0.1:%s\n' \
+        "$ssh_target" "$project_flag" "$ssh_zone" "$JUPYTER_PORT" "$JUPYTER_PORT"
+      printf '           http://127.0.0.1:%s/lab?token=%s\n' "$JUPYTER_PORT" "$JUPYTER_TOKEN"
+    fi
+    printf '  status:  systemctl --user status tpu-jupyter.service\n'
+    printf '  logs:    journalctl --user -u tpu-jupyter.service -f\n'
+    printf '  kernel:  TPU Dev (%s)  ← select in VS Code / JupyterLab\n' "$ENV_NAME"
+  fi
 
-  systemctl --user status tpu-jupyter.service
-  journalctl --user -u tpu-jupyter.service -f
+  # ── Marimo ─────────────────────────────────────────────────────
+  if [[ "$ENABLE_MARIMO" == "yes" ]]; then
+    printf '\n%s\n' "$SEP"
+    printf '🧩  Marimo\n\n'
+    printf '  url:     http://%s:%s/?access_token=%s\n' "$marimo_host" "$MARIMO_PORT" "$MARIMO_TOKEN"
+    if [[ "$PUBLIC_MARIMO" == "yes" ]]; then
+      printf '  tunnel:  gcloud compute tpus tpu-vm ssh %s %s --zone=%s -- -L %s:127.0.0.1:%s\n' \
+        "$ssh_target" "$project_flag" "$ssh_zone" "$MARIMO_PORT" "$MARIMO_PORT"
+      printf '           http://127.0.0.1:%s/?access_token=%s\n' "$MARIMO_PORT" "$MARIMO_TOKEN"
+    fi
+    printf '  status:  systemctl --user status tpu-marimo.service\n'
+    printf '  logs:    journalctl --user -u tpu-marimo.service -f\n'
+  fi
 
-URL:
-
-  http://$host:$JUPYTER_PORT/lab?token=$JUPYTER_TOKEN
-
-🔐 Token file
-  $SECRETS_FILE
-
-🚇 SSH tunnel fallback
-
-  gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone -- -L $JUPYTER_PORT:127.0.0.1:$JUPYTER_PORT
-
-  http://127.0.0.1:$JUPYTER_PORT/lab?token=$JUPYTER_TOKEN
-
-🧠 Remote Jupyter kernel
-  Use the Jupyter server URL above in VS Code/Jupyter and select kernel "TPU Dev ($ENV_NAME)".
-EOF
+  printf '\n%s\n\n' "$SEP"
 }
+
 
 main() {
   require_linux
