@@ -86,8 +86,8 @@ ranges.
 Public Jupyter:
 
 The installer can bind JupyterLab to `0.0.0.0` with a generated token. It prints
-a firewall command but does not run it. Prefer restricting `--source-ranges` to
-your current IP/CIDR.
+firewall commands to run from your laptop or Cloud Shell. Prefer restricting
+`--source-ranges` to your current IP/CIDR.
 
 `--source-ranges` means "which client IPs are allowed to connect." When the
 installer runs on the TPU VM, automatic detection may see the TPU VM's outbound
@@ -112,6 +112,9 @@ For a research group where the token URL should be reachable from anywhere:
 
 This prints a firewall command with `--source-ranges 0.0.0.0/0`. It is public
 internet exposure, so rotate the token or stop the service when done.
+
+If Marimo is enabled, the installer also prints a concrete public Marimo URL and
+a separate Marimo firewall command for the Marimo port.
 
 Remote kernel:
 
