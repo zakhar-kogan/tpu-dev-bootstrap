@@ -47,6 +47,10 @@ curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/install.sh | bash
 
 ## Access
 
+By default, SSH access is controlled by your Google Cloud IAM/OS Login/project
+metadata. Someone outside your Google Cloud account cannot SSH unless you grant
+them IAM access or explicitly add a separate SSH public key.
+
 SSH tunnel:
 
 ```bash
@@ -55,6 +59,17 @@ gcloud compute tpus tpu-vm ssh <TPU_NAME> --zone=<ZONE> -- \
 ```
 
 Then open the URL printed by the installer.
+
+Shared SSH key:
+
+```bash
+./install.sh --generate-share-ssh-key yes
+```
+
+The installer creates an Ed25519 keypair and prints the command to append the
+public key to `~/.ssh/authorized_keys` on the TPU VM. Share the private key only
+with trusted collaborators and remove the public key from `authorized_keys` to
+revoke access.
 
 Public Jupyter:
 

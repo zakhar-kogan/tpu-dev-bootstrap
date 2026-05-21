@@ -46,6 +46,9 @@ GCP_PROJECT=""
 GCP_ZONE=""
 TPU_NAME=""
 TPU_EXTERNAL_IP=""
+GENERATE_SHARE_SSH_KEY="no"
+SHARE_SSH_USER="$USER"
+SHARE_SSH_KEY_PATH=""
 EXTRA_PIP=()
 RECREATE="no"
 ASSUME_YES="no"
@@ -88,6 +91,9 @@ Options:
   --zone ZONE                      Override detected TPU zone for commands.
   --tpu-name NAME                  Override detected TPU VM name for commands.
   --external-ip IP                 Override detected external IP for URL.
+  --generate-share-ssh-key yes|no  Generate a shareable SSH keypair. Default: no.
+  --share-ssh-user USER            Linux username for the shared SSH key. Default: current user.
+  --share-ssh-key-path PATH        SSH key path. Default: ~/.ssh/tpu-dev-<env-name>.
   --recreate                       Delete and recreate the target venv.
   --yes                            Accept defaults without prompts.
   --dry-run                        Print actions without changing the machine.
@@ -264,6 +270,9 @@ while [[ $# -gt 0 ]]; do
     --zone) GCP_ZONE="${2:?}"; shift 2 ;;
     --tpu-name) TPU_NAME="${2:?}"; shift 2 ;;
     --external-ip) TPU_EXTERNAL_IP="${2:?}"; shift 2 ;;
+    --generate-share-ssh-key) GENERATE_SHARE_SSH_KEY="$(parse_bool "${2:?}")"; shift 2 ;;
+    --share-ssh-user) SHARE_SSH_USER="${2:?}"; shift 2 ;;
+    --share-ssh-key-path) SHARE_SSH_KEY_PATH="${2:?}"; shift 2 ;;
     --recreate) RECREATE="yes"; shift ;;
     --yes) ASSUME_YES="yes"; shift ;;
     --dry-run) DRY_RUN="yes"; shift ;;
@@ -296,6 +305,8 @@ fi
 ENV_BASE="${ENV_BASE/#\~/$HOME}"
 ENV_DIR="${ENV_DIR/#\~/$HOME}"
 [[ -z "$ENV_DIR" ]] && ENV_DIR="$ENV_BASE/$ENV_NAME"
+[[ -z "$SHARE_SSH_KEY_PATH" ]] && SHARE_SSH_KEY_PATH="$HOME/.ssh/tpu-dev-$ENV_NAME"
+SHARE_SSH_KEY_PATH="${SHARE_SSH_KEY_PATH/#\~/$HOME}"
 VENV_DIR="$ENV_DIR/.venv"
 CONFIG_HOME="$DEFAULT_CONFIG_HOME"
 SECRETS_FILE="$CONFIG_HOME/secrets.env"
@@ -610,6 +621,57 @@ EOF
   fi
 }
 
+generate_share_ssh_key() {
+  [[ "$GENERATE_SHARE_SSH_KEY" == "yes" ]] || return 0
+  log "Generating shareable SSH key"
+  run mkdir -p "$(dirname "$SHARE_SSH_KEY_PATH")"
+  if [[ -f "$SHARE_SSH_KEY_PATH" ]]; then
+    warn "SSH key already exists: $SHARE_SSH_KEY_PATH"
+  else
+    run ssh-keygen -t ed25519 -N "" -C "$SHARE_SSH_USER@tpu-dev-$ENV_NAME" -f "$SHARE_SSH_KEY_PATH"
+  fi
+}
+
+print_share_ssh_instructions() {
+  [[ "$GENERATE_SHARE_SSH_KEY" == "yes" ]] || return 0
+  local pubkey_file="$SHARE_SSH_KEY_PATH.pub"
+  local command_file="$SHARE_SSH_KEY_PATH.add-to-tpu.sh"
+  local ssh_target="${TPU_NAME:-<TPU_NAME>}"
+  local ssh_zone="${GCP_ZONE:-<ZONE>}"
+  local project_arg=""
+  local public_key_text="<PUBLIC_KEY>"
+  [[ -n "$GCP_PROJECT" ]] && project_arg=" --project=$GCP_PROJECT"
+  if [[ -f "$pubkey_file" ]]; then
+    public_key_text="$(cat "$pubkey_file")"
+  fi
+  if [[ "$DRY_RUN" != "yes" && -f "$pubkey_file" ]]; then
+    cat > "$command_file" <<EOF_CMD
+#!/usr/bin/env bash
+set -Eeuo pipefail
+gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone --worker=all --command 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && grep -qxF "$public_key_text" ~/.ssh/authorized_keys 2>/dev/null || printf "%s\n" "$public_key_text" >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+EOF_CMD
+    chmod 700 "$command_file"
+  fi
+  cat <<EOF
+
+Shareable SSH key:
+  private key: $SHARE_SSH_KEY_PATH
+  public key:  $pubkey_file
+  add command: $command_file
+
+To authorize this key on the TPU VM, run:
+
+  $command_file
+
+Then someone with the private key can connect with:
+
+  gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone --ssh-key-file=$SHARE_SSH_KEY_PATH
+
+Share the private key only with people you trust. Remove the matching line from
+~/.ssh/authorized_keys on the TPU VM to revoke access.
+EOF
+}
+
 print_summary() {
   local host="127.0.0.1"
   if [[ "$PUBLIC_JUPYTER" == "yes" ]]; then
@@ -654,8 +716,10 @@ main() {
   register_kernel
   install_jupyter_service
   install_marimo_service
+  generate_share_ssh_key
   print_firewall_commands
   print_cloudflare
+  print_share_ssh_instructions
   print_summary
 }
 
