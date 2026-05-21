@@ -552,7 +552,7 @@ After=network-online.target
 Type=simple
 WorkingDirectory=$ENV_DIR
 Environment=PATH=$VENV_DIR/bin:$HOME/.local/bin:$HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=$VENV_DIR/bin/marimo edit --host $bind_ip --port $MARIMO_PORT --headless --token-password=$MARIMO_TOKEN
+ExecStart=$VENV_DIR/bin/marimo edit --host $bind_ip --port $MARIMO_PORT --headless --token --token-password=$MARIMO_TOKEN
 Restart=on-failure
 RestartSec=5
 
@@ -611,20 +611,18 @@ Run these from your laptop or Cloud Shell, not from the TPU VM.
 
 JupyterLab firewall:
 
-\`\`\`bash
-if gcloud compute firewall-rules describe $rule_name${GCP_PROJECT:+ --project $GCP_PROJECT} >/dev/null 2>&1; then
-  gcloud compute firewall-rules update $rule_name \\
-    --allow tcp:$JUPYTER_PORT \\
-    --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
-    --project $GCP_PROJECT}
-else
-  gcloud compute firewall-rules create $rule_name \\
-    --allow tcp:$JUPYTER_PORT \\
-    --network default \\
-    --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
-    --project $GCP_PROJECT}
-fi
-\`\`\`
+  if gcloud compute firewall-rules describe $rule_name${GCP_PROJECT:+ --project $GCP_PROJECT} >/dev/null 2>&1; then
+    gcloud compute firewall-rules update $rule_name \\
+      --allow tcp:$JUPYTER_PORT \\
+      --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
+      --project $GCP_PROJECT}
+  else
+    gcloud compute firewall-rules create $rule_name \\
+      --allow tcp:$JUPYTER_PORT \\
+      --network default \\
+      --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
+      --project $GCP_PROJECT}
+  fi
 EOF
 
   if [[ "$ENABLE_MARIMO" == "yes" ]]; then
@@ -632,20 +630,18 @@ EOF
 
 Marimo firewall:
 
-\`\`\`bash
-if gcloud compute firewall-rules describe $marimo_rule_name${GCP_PROJECT:+ --project $GCP_PROJECT} >/dev/null 2>&1; then
-  gcloud compute firewall-rules update $marimo_rule_name \\
-    --allow tcp:$MARIMO_PORT \\
-    --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
-    --project $GCP_PROJECT}
-else
-  gcloud compute firewall-rules create $marimo_rule_name \\
-    --allow tcp:$MARIMO_PORT \\
-    --network default \\
-    --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
-    --project $GCP_PROJECT}
-fi
-\`\`\`
+  if gcloud compute firewall-rules describe $marimo_rule_name${GCP_PROJECT:+ --project $GCP_PROJECT} >/dev/null 2>&1; then
+    gcloud compute firewall-rules update $marimo_rule_name \\
+      --allow tcp:$MARIMO_PORT \\
+      --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
+      --project $GCP_PROJECT}
+  else
+    gcloud compute firewall-rules create $marimo_rule_name \\
+      --allow tcp:$MARIMO_PORT \\
+      --network default \\
+      --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
+      --project $GCP_PROJECT}
+  fi
 EOF
   fi
 
@@ -696,20 +692,18 @@ print_ssh_firewall_commands() {
 🔑 SSH firewall
 Direct SSH needs tcp:$SSH_PORT open unless an existing firewall rule already covers it.
 
-\`\`\`bash
-if gcloud compute firewall-rules describe $rule_name${GCP_PROJECT:+ --project $GCP_PROJECT} >/dev/null 2>&1; then
-  gcloud compute firewall-rules update $rule_name \\
-    --allow tcp:$SSH_PORT \\
-    --source-ranges $ssh_source_range${GCP_PROJECT:+ \\
-    --project $GCP_PROJECT}
-else
-  gcloud compute firewall-rules create $rule_name \\
-    --allow tcp:$SSH_PORT \\
-    --network default \\
-    --source-ranges $ssh_source_range${GCP_PROJECT:+ \\
-    --project $GCP_PROJECT}
-fi
-\`\`\`
+  if gcloud compute firewall-rules describe $rule_name${GCP_PROJECT:+ --project $GCP_PROJECT} >/dev/null 2>&1; then
+    gcloud compute firewall-rules update $rule_name \\
+      --allow tcp:$SSH_PORT \\
+      --source-ranges $ssh_source_range${GCP_PROJECT:+ \\
+      --project $GCP_PROJECT}
+  else
+    gcloud compute firewall-rules create $rule_name \\
+      --allow tcp:$SSH_PORT \\
+      --network default \\
+      --source-ranges $ssh_source_range${GCP_PROJECT:+ \\
+      --project $GCP_PROJECT}
+  fi
 EOF
 }
 
@@ -796,30 +790,22 @@ EOF_CMD
 The public key has been added to this VM's ~/.ssh/authorized_keys.
 If you need to authorize it on all TPU workers, run:
 
-\`\`\`bash
-$command_file
-\`\`\`
+  $command_file
 
 Copy or transfer the private key:
 
-\`\`\`bash
-cat $SHARE_SSH_KEY_PATH
-scp $SHARE_SSH_KEY_PATH collaborator@host:~/Downloads/
-\`\`\`
+  cat $SHARE_SSH_KEY_PATH
+  scp $SHARE_SSH_KEY_PATH collaborator@host:~/Downloads/
 
 Send collaborators the private key file plus this plain SSH command, no gcloud
 needed:
 
-\`\`\`bash
-chmod 600 ./$(basename "$SHARE_SSH_KEY_PATH")
-ssh -i ./$(basename "$SHARE_SSH_KEY_PATH") -o IdentitiesOnly=yes -p $SSH_PORT $SHARE_SSH_USER@$ssh_host
-\`\`\`
+  chmod 600 ./$(basename "$SHARE_SSH_KEY_PATH")
+  ssh -i ./$(basename "$SHARE_SSH_KEY_PATH") -o IdentitiesOnly=yes -p $SSH_PORT $SHARE_SSH_USER@$ssh_host
 
 Owner gcloud SSH command, if needed:
 
-\`\`\`bash
-gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone --ssh-key-file=$SHARE_SSH_KEY_PATH
-\`\`\`
+  gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone --ssh-key-file=$SHARE_SSH_KEY_PATH
 
 Share the private key only with people you trust. Remove the matching line from
 ~/.ssh/authorized_keys on the TPU VM to revoke access.
@@ -837,10 +823,8 @@ print_marimo_summary() {
 🧩 Marimo
 Service:
 
-\`\`\`bash
   systemctl --user status tpu-marimo.service
   journalctl --user -u tpu-marimo.service -f
-\`\`\`
 
 Public URL:
 
@@ -848,9 +832,7 @@ Public URL:
 
 SSH tunnel fallback:
 
-\`\`\`bash
-gcloud compute tpus tpu-vm ssh ${TPU_NAME:-<TPU_NAME>}${GCP_PROJECT:+ --project=$GCP_PROJECT} --zone=${GCP_ZONE:-<ZONE>} -- -L $MARIMO_PORT:127.0.0.1:$MARIMO_PORT
-\`\`\`
+  gcloud compute tpus tpu-vm ssh ${TPU_NAME:-<TPU_NAME>}${GCP_PROJECT:+ --project=$GCP_PROJECT} --zone=${GCP_ZONE:-<ZONE>} -- -L $MARIMO_PORT:127.0.0.1:$MARIMO_PORT
 
   http://127.0.0.1:$MARIMO_PORT/?access_token=$MARIMO_TOKEN
 EOF
@@ -875,10 +857,8 @@ print_summary() {
 🧪 JupyterLab
 Service:
 
-\`\`\`bash
   systemctl --user status tpu-jupyter.service
   journalctl --user -u tpu-jupyter.service -f
-\`\`\`
 
 URL:
 
@@ -889,9 +869,7 @@ URL:
 
 🚇 SSH tunnel fallback
 
-\`\`\`bash
-gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone -- -L $JUPYTER_PORT:127.0.0.1:$JUPYTER_PORT
-\`\`\`
+  gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone -- -L $JUPYTER_PORT:127.0.0.1:$JUPYTER_PORT
 
   http://127.0.0.1:$JUPYTER_PORT/lab?token=$JUPYTER_TOKEN
 
