@@ -1,0 +1,30 @@
+# Flat YAML config for install.sh. CLI flags override defaults before prompts.
+
+python_version: "3.10"
+env_name: "tpu-dev"
+env_base: "~/.local/share/tpu-dev/envs"
+
+jupyter_port: 8888
+public_jupyter: yes
+
+enable_marimo: no
+marimo_port: 2718
+
+cloudflare_quick_tunnel: no
+
+package_groups:
+  - core
+  - tpu
+  - research
+  - viz
+
+# cayleypy_source can be git, pip, or none.
+cayleypy_source: git
+cayleypy_git: "git+https://github.com/cayleypy/cayleypy/"
+cayleypy_pip: "cayleypy"
+
+# Keep these aligned unless you know the TPU image/runtime needs another pair.
+torch_version: "2.9.0"
+torch_xla_version: "2.9.0"
+
+extra_pip: []

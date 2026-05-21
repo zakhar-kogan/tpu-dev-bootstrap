@@ -1,0 +1,14 @@
+[Unit]
+Description=TPU Dev JupyterLab
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{ENV_DIR}}
+Environment=PATH={{VENV_DIR}}/bin:{{HOME}}/.local/bin:{{HOME}}/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart={{VENV_DIR}}/bin/jupyter lab --ip={{BIND_IP}} --port={{JUPYTER_PORT}} --no-browser --ServerApp.token={{JUPYTER_TOKEN}} --ServerApp.password= --ServerApp.open_browser=False --ServerApp.allow_remote_access={{ALLOW_REMOTE_ACCESS}}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
