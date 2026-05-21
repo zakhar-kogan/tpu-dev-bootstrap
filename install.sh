@@ -30,9 +30,11 @@ ENV_DIR=""
 JUPYTER_PORT="$DEFAULT_JUPYTER_PORT"
 MARIMO_PORT="$DEFAULT_MARIMO_PORT"
 PUBLIC_JUPYTER="ask"
+PUBLIC_MARIMO="ask"
 ENABLE_JUPYTER="yes"
 ENABLE_MARIMO="no"
 CLOUDFLARE_TUNNEL="no"
+APT_PACKAGES=()
 PACKAGE_GROUPS="$DEFAULT_PACKAGE_GROUPS"
 CAYLEYPY_SOURCE="$DEFAULT_CAYLEYPY_SOURCE"
 CAYLEYPY_GIT="$DEFAULT_CAYLEYPY_GIT"
@@ -58,9 +60,9 @@ RECREATE="no"
 ASSUME_YES="no"
 DRY_RUN="no"
 
-log() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
+log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mWARN:\033[0m %s\n' "$*" >&2; }
-die() { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
+die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'USAGE'
@@ -80,9 +82,11 @@ Options:
   --public-jupyter yes|no|ask      Bind Jupyter to 0.0.0.0 or localhost. Default: ask.
   --marimo yes|no                  Install and start Marimo service. Default: no.
   --marimo-port PORT               Marimo port. Default: 2718.
+  --public-marimo yes|no|ask       Bind Marimo to 0.0.0.0 or localhost. Default: ask (when Marimo enabled).
   --cloudflare-quick-tunnel yes|no Start a quick cloudflared tunnel command. Default: no.
   --package-groups LIST            Comma list: core,tpu,research,viz,marimo,ui-demos,jax,dev.
   --extra-pip PACKAGE              Extra pip spec. Repeatable.
+  --apt-packages PKG               Extra apt package to install. Repeatable.
   --cayleypy-source git|pip|none   Default: git.
   --cayleypy-git SPEC              Default: git+https://github.com/cayleypy/cayleypy/
   --cayleypy-pip SPEC              Default: cayleypy.
@@ -263,9 +267,11 @@ while [[ $# -gt 0 ]]; do
     --public-jupyter) PUBLIC_JUPYTER="$(parse_bool "${2:?}")"; shift 2 ;;
     --marimo) ENABLE_MARIMO="$(parse_bool "${2:?}")"; shift 2 ;;
     --marimo-port) MARIMO_PORT="${2:?}"; shift 2 ;;
+    --public-marimo) PUBLIC_MARIMO="$(parse_bool "${2:?}")"; shift 2 ;;
     --cloudflare-quick-tunnel) CLOUDFLARE_TUNNEL="$(parse_bool "${2:?}")"; shift 2 ;;
     --package-groups) PACKAGE_GROUPS="${2:?}"; shift 2 ;;
     --extra-pip) EXTRA_PIP+=("${2:?}"); shift 2 ;;
+    --apt-packages) APT_PACKAGES+=("${2:?}"); shift 2 ;;
     --cayleypy-source) CAYLEYPY_SOURCE="${2:?}"; shift 2 ;;
     --cayleypy-git) CAYLEYPY_GIT="${2:?}"; shift 2 ;;
     --cayleypy-pip) CAYLEYPY_PIP="${2:?}"; shift 2 ;;
@@ -309,11 +315,17 @@ if have_tty && [[ "$ASSUME_YES" != "yes" ]]; then
   ENABLE_MARIMO="$(prompt_yes_no "Install and run Marimo" "$ENABLE_MARIMO")"
   if [[ "$ENABLE_MARIMO" == "yes" ]]; then
     MARIMO_PORT="$(prompt_default "Marimo port" "$MARIMO_PORT")"
+    if [[ "$PUBLIC_MARIMO" == "ask" ]]; then
+      PUBLIC_MARIMO="$(prompt_yes_no "Bind Marimo publicly with token auth" "yes")"
+    fi
   fi
   CLOUDFLARE_TUNNEL="$(prompt_yes_no "Start/print Cloudflare quick tunnel" "$CLOUDFLARE_TUNNEL")"
 fi
 
 [[ "$PUBLIC_JUPYTER" == "ask" ]] && PUBLIC_JUPYTER="yes"
+# If Marimo is disabled, PUBLIC_MARIMO doesn't matter; if enabled and still
+# "ask" (i.e. --yes / non-TTY path), default to same binding as Jupyter.
+[[ "$PUBLIC_MARIMO" == "ask" ]] && PUBLIC_MARIMO="$PUBLIC_JUPYTER"
 ENV_BASE="${ENV_BASE/#\~/$HOME}"
 ENV_DIR="${ENV_DIR/#\~/$HOME}"
 [[ -z "$ENV_DIR" ]] && ENV_DIR="$ENV_BASE/$ENV_NAME"
@@ -371,9 +383,18 @@ install_system_deps() {
   log "Installing system dependencies"
   if command -v apt-get >/dev/null 2>&1; then
     run sudo apt-get update
-    run sudo apt-get install -y ca-certificates curl git build-essential jq openssl
+    local base_pkgs=(ca-certificates curl git build-essential jq openssl)
+    if ((${#APT_PACKAGES[@]} > 0)); then
+      log "Extra apt packages: ${APT_PACKAGES[*]}"
+      run sudo apt-get install -y "${base_pkgs[@]}" "${APT_PACKAGES[@]}"
+    else
+      run sudo apt-get install -y "${base_pkgs[@]}"
+    fi
   else
     warn "apt-get not found; install curl/git/build tools manually if missing."
+    if ((${#APT_PACKAGES[@]} > 0)); then
+      warn "Skipping extra apt packages (no apt-get): ${APT_PACKAGES[*]}"
+    fi
   fi
 }
 
@@ -531,15 +552,19 @@ WantedBy=default.target"
   write_service "jupyter" "$SYSTEMD_USER_DIR/tpu-jupyter.service" "$service"
   if [[ "$DRY_RUN" != "yes" ]]; then
     systemctl --user daemon-reload
-    systemctl --user enable --now tpu-jupyter.service
+    systemctl --user enable tpu-jupyter.service
+    # Always restart so a re-run picks up changed flags (bind IP, port, token).
+    # `restart` starts the service if not running, so `--now` is not needed.
+    systemctl --user restart tpu-jupyter.service
     loginctl enable-linger "$USER" >/dev/null 2>&1 || true
   fi
 }
 
 install_marimo_service() {
   [[ "$ENABLE_MARIMO" == "yes" ]] || return 0
+  # Use PUBLIC_MARIMO (not PUBLIC_JUPYTER) — they are independently configurable.
   local bind_ip="127.0.0.1"
-  if [[ "$PUBLIC_JUPYTER" == "yes" ]]; then
+  if [[ "$PUBLIC_MARIMO" == "yes" ]]; then
     bind_ip="0.0.0.0"
   fi
   log "Installing Marimo user service"
@@ -561,7 +586,9 @@ WantedBy=default.target"
   write_service "marimo" "$SYSTEMD_USER_DIR/tpu-marimo.service" "$service"
   if [[ "$DRY_RUN" != "yes" ]]; then
     systemctl --user daemon-reload
-    systemctl --user enable --now tpu-marimo.service
+    systemctl --user enable tpu-marimo.service
+    # Always restart so a re-run picks up changed flags (bind IP, port, token).
+    systemctl --user restart tpu-marimo.service
   fi
 }
 
