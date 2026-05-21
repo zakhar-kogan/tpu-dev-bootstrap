@@ -422,9 +422,19 @@ create_env() {
   if [[ ! -d "$VENV_DIR" ]]; then
     run uv venv --python "$PYTHON_VERSION" --seed "$VENV_DIR"
   else
-    log "Reusing existing venv"
+    # Check if the existing venv's Python version matches what was requested.
+    local actual_ver
+    actual_ver="$("$VENV_DIR/bin/python" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+    if [[ -n "$actual_ver" && "$actual_ver" != "$PYTHON_VERSION"* ]]; then
+      warn "Existing venv uses Python $actual_ver but you requested $PYTHON_VERSION."
+      warn "Re-run with --recreate to rebuild the venv with the new Python version."
+      warn "Continuing with Python $actual_ver."
+    else
+      log "Reusing existing venv (Python $actual_ver)"
+    fi
   fi
 }
+
 
 group_packages() {
   local group="$1"
