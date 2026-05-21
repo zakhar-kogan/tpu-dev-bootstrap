@@ -15,6 +15,7 @@ DEFAULT_CAYLEYPY_GIT="git+https://github.com/cayleypy/cayleypy/"
 DEFAULT_CAYLEYPY_PIP="cayleypy"
 DEFAULT_TORCH_VERSION="2.9.0"
 DEFAULT_TORCH_XLA_VERSION="2.9.0"
+METADATA_BASE="http://metadata.google.internal/computeMetadata/v1"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "$SCRIPT_DIR" == "/" || ! -f "$SCRIPT_DIR/install.sh" ]]; then
@@ -38,6 +39,13 @@ CAYLEYPY_GIT="$DEFAULT_CAYLEYPY_GIT"
 CAYLEYPY_PIP="$DEFAULT_CAYLEYPY_PIP"
 TORCH_VERSION="$DEFAULT_TORCH_VERSION"
 TORCH_XLA_VERSION="$DEFAULT_TORCH_XLA_VERSION"
+PRINT_FIREWALL_COMMAND="yes"
+APPLY_FIREWALL="no"
+FIREWALL_SOURCE_RANGE="auto"
+GCP_PROJECT=""
+GCP_ZONE=""
+TPU_NAME=""
+TPU_EXTERNAL_IP=""
 EXTRA_PIP=()
 RECREATE="no"
 ASSUME_YES="no"
@@ -73,6 +81,13 @@ Options:
   --cayleypy-pip SPEC              Default: cayleypy.
   --torch-version VERSION          Default: 2.9.0.
   --torch-xla-version VERSION      Default: 2.9.0.
+  --firewall-source CIDR|auto      Source range for printed/applied firewall rule. Default: auto.
+  --print-firewall-command yes|no  Print gcloud firewall command. Default: yes.
+  --apply-firewall yes|no          Create/update firewall rule. Default: no.
+  --project PROJECT                Override detected GCP project for commands.
+  --zone ZONE                      Override detected TPU zone for commands.
+  --tpu-name NAME                  Override detected TPU VM name for commands.
+  --external-ip IP                 Override detected external IP for URL.
   --recreate                       Delete and recreate the target venv.
   --yes                            Accept defaults without prompts.
   --dry-run                        Print actions without changing the machine.
@@ -242,6 +257,13 @@ while [[ $# -gt 0 ]]; do
     --cayleypy-pip) CAYLEYPY_PIP="${2:?}"; shift 2 ;;
     --torch-version) TORCH_VERSION="${2:?}"; shift 2 ;;
     --torch-xla-version) TORCH_XLA_VERSION="${2:?}"; shift 2 ;;
+    --firewall-source) FIREWALL_SOURCE_RANGE="${2:?}"; shift 2 ;;
+    --print-firewall-command) PRINT_FIREWALL_COMMAND="$(parse_bool "${2:?}")"; shift 2 ;;
+    --apply-firewall) APPLY_FIREWALL="$(parse_bool "${2:?}")"; shift 2 ;;
+    --project) GCP_PROJECT="${2:?}"; shift 2 ;;
+    --zone) GCP_ZONE="${2:?}"; shift 2 ;;
+    --tpu-name) TPU_NAME="${2:?}"; shift 2 ;;
+    --external-ip) TPU_EXTERNAL_IP="${2:?}"; shift 2 ;;
     --recreate) RECREATE="yes"; shift ;;
     --yes) ASSUME_YES="yes"; shift ;;
     --dry-run) DRY_RUN="yes"; shift ;;
@@ -284,6 +306,37 @@ IFS=',' read -r -a GROUPS_ARRAY <<< "$PACKAGE_GROUPS"
 
 require_linux() {
   [[ "$(uname -s)" == "Linux" ]] || die "This installer targets Linux TPU VMs."
+}
+
+metadata_get() {
+  local path="$1"
+  curl -fsS --connect-timeout 1 --max-time 2 \
+    -H "Metadata-Flavor: Google" \
+    "$METADATA_BASE/$path" 2>/dev/null || true
+}
+
+detect_gcp_metadata() {
+  log "Detecting GCP/TPU metadata"
+  local zone_path
+  [[ -n "$GCP_PROJECT" ]] || GCP_PROJECT="$(metadata_get project/project-id)"
+  if [[ -z "$GCP_ZONE" ]]; then
+    zone_path="$(metadata_get instance/zone)"
+    GCP_ZONE="${zone_path##*/}"
+  fi
+  [[ -n "$TPU_NAME" ]] || TPU_NAME="$(metadata_get instance/name)"
+  [[ -n "$TPU_EXTERNAL_IP" ]] || TPU_EXTERNAL_IP="$(metadata_get instance/network-interfaces/0/access-configs/0/external-ip)"
+}
+
+detect_source_range() {
+  if [[ "$FIREWALL_SOURCE_RANGE" != "auto" ]]; then
+    return
+  fi
+  if [[ "$APPLY_FIREWALL" == "yes" ]]; then
+    die "--apply-firewall requires explicit --firewall-source CIDR. Auto-detection from the TPU VM may detect the VM egress IP, not your laptop IP."
+  fi
+  local ip
+  ip="$(curl -fsS --connect-timeout 2 --max-time 5 https://ifconfig.me 2>/dev/null || true)"
+  [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && FIREWALL_SOURCE_RANGE="$ip/32" || FIREWALL_SOURCE_RANGE="<YOUR_IP_CIDR>"
 }
 
 install_system_deps() {
@@ -479,15 +532,46 @@ register_kernel() {
 
 print_firewall_commands() {
   [[ "$PUBLIC_JUPYTER" == "yes" ]] || return 0
+  [[ "$PRINT_FIREWALL_COMMAND" == "yes" || "$APPLY_FIREWALL" == "yes" ]] || return 0
+  detect_source_range
+  local rule_name="allow-tpu-jupyter-$JUPYTER_PORT"
+  local command=(
+    gcloud compute firewall-rules create "$rule_name"
+    --allow "tcp:$JUPYTER_PORT"
+    --network default
+    --source-ranges "$FIREWALL_SOURCE_RANGE"
+  )
+  if [[ -n "$GCP_PROJECT" ]]; then
+    command+=(--project "$GCP_PROJECT")
+  fi
+  if [[ "$APPLY_FIREWALL" == "yes" ]]; then
+    log "Creating firewall rule $rule_name"
+    if gcloud compute firewall-rules describe "$rule_name" ${GCP_PROJECT:+--project "$GCP_PROJECT"} >/dev/null 2>&1; then
+      run gcloud compute firewall-rules update "$rule_name" \
+        --allow "tcp:$JUPYTER_PORT" \
+        --source-ranges "$FIREWALL_SOURCE_RANGE" \
+        ${GCP_PROJECT:+--project "$GCP_PROJECT"}
+    else
+      run "${command[@]}"
+    fi
+  fi
   cat <<EOF
 
-Firewall is not changed by this installer. To allow public Jupyter access, run
-from your local machine or Cloud Shell:
+Firewall source ranges are the client IPs allowed to connect to public Jupyter.
+If this script runs on the TPU VM, auto-detection may show the TPU VM egress IP,
+not your laptop IP. Override it with --firewall-source <YOUR_IP>/32 when needed.
 
-  gcloud compute firewall-rules create allow-tpu-jupyter-$JUPYTER_PORT \\
+Suggested source range:
+
+  $FIREWALL_SOURCE_RANGE
+
+To allow public Jupyter access, run from your local machine or Cloud Shell:
+
+  gcloud compute firewall-rules create $rule_name \\
     --allow tcp:$JUPYTER_PORT \\
     --network default \\
-    --source-ranges <YOUR_IP_CIDR>
+    --source-ranges $FIREWALL_SOURCE_RANGE${GCP_PROJECT:+ \\
+    --project $GCP_PROJECT}
 
 Prefer a narrow source range. Avoid 0.0.0.0/0 unless this is temporary.
 EOF
@@ -528,7 +612,13 @@ EOF
 
 print_summary() {
   local host="127.0.0.1"
-  [[ "$PUBLIC_JUPYTER" == "yes" ]] && host="<TPU_EXTERNAL_IP>"
+  if [[ "$PUBLIC_JUPYTER" == "yes" ]]; then
+    host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
+  fi
+  local ssh_target="${TPU_NAME:-<TPU_NAME>}"
+  local ssh_zone="${GCP_ZONE:-<ZONE>}"
+  local project_arg=""
+  [[ -n "$GCP_PROJECT" ]] && project_arg=" --project=$GCP_PROJECT"
   cat <<EOF
 
 Done.
@@ -545,7 +635,7 @@ Token file:
   $SECRETS_FILE
 
 SSH tunnel access:
-  gcloud compute tpus tpu-vm ssh <TPU_NAME> --zone=<ZONE> -- -L $JUPYTER_PORT:127.0.0.1:$JUPYTER_PORT
+  gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone -- -L $JUPYTER_PORT:127.0.0.1:$JUPYTER_PORT
   http://127.0.0.1:$JUPYTER_PORT/lab?token=$JUPYTER_TOKEN
 
 Remote Jupyter kernel:
@@ -555,6 +645,7 @@ EOF
 
 main() {
   require_linux
+  detect_gcp_metadata
   install_system_deps
   install_uv
   create_env

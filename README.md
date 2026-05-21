@@ -38,6 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/install.sh | bash
 - `uv` virtual environment under `~/.local/share/tpu-dev/envs/<name>`
 - JupyterLab enabled by default
 - Public Jupyter prompt defaults to yes, protected by a generated token
+- TPU name, zone, project, and external IP are auto-detected from GCP metadata
 - Kernel registered as `TPU Dev (<env-name>)`
 - Marimo disabled by default
 - Cloudflare quick tunnel optional
@@ -60,6 +61,21 @@ Public Jupyter:
 The installer can bind JupyterLab to `0.0.0.0` with a generated token. It prints
 a firewall command but does not run it. Prefer restricting `--source-ranges` to
 your current IP/CIDR.
+
+`--source-ranges` means "which client IPs are allowed to connect." When the
+installer runs on the TPU VM, automatic detection may see the TPU VM's outbound
+IP, not your laptop IP. Prefer passing your local IP explicitly:
+
+```bash
+./install.sh --firewall-source 203.0.113.10/32
+```
+
+To let the installer create/update the firewall rule instead of only printing
+the command:
+
+```bash
+./install.sh --apply-firewall yes --firewall-source 203.0.113.10/32
+```
 
 Remote kernel:
 
