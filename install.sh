@@ -42,6 +42,10 @@ TORCH_XLA_VERSION="$DEFAULT_TORCH_XLA_VERSION"
 PRINT_FIREWALL_COMMAND="yes"
 APPLY_FIREWALL="no"
 FIREWALL_SOURCE_RANGE="auto"
+PUBLIC_JUPYTER_OPEN="no"
+PUBLIC_SSH_OPEN="no"
+APPLY_SSH_FIREWALL="no"
+SSH_PORT="22"
 GCP_PROJECT=""
 GCP_ZONE=""
 TPU_NAME=""
@@ -85,8 +89,12 @@ Options:
   --torch-version VERSION          Default: 2.9.0.
   --torch-xla-version VERSION      Default: 2.9.0.
   --firewall-source CIDR|auto      Source range for printed/applied firewall rule. Default: auto.
+  --public-jupyter-open yes|no     Use 0.0.0.0/0 source range for public Jupyter. Default: no.
+  --public-ssh-open yes|no         Print SSH firewall rule with 0.0.0.0/0. Default: no.
+  --ssh-port PORT                  SSH port for firewall and plain ssh command. Default: 22.
   --print-firewall-command yes|no  Print gcloud firewall command. Default: yes.
   --apply-firewall yes|no          Create/update firewall rule. Default: no.
+  --apply-ssh-firewall yes|no      Create/update tcp:22 firewall rule. Default: no.
   --project PROJECT                Override detected GCP project for commands.
   --zone ZONE                      Override detected TPU zone for commands.
   --tpu-name NAME                  Override detected TPU VM name for commands.
@@ -264,8 +272,12 @@ while [[ $# -gt 0 ]]; do
     --torch-version) TORCH_VERSION="${2:?}"; shift 2 ;;
     --torch-xla-version) TORCH_XLA_VERSION="${2:?}"; shift 2 ;;
     --firewall-source) FIREWALL_SOURCE_RANGE="${2:?}"; shift 2 ;;
+    --public-jupyter-open) PUBLIC_JUPYTER_OPEN="$(parse_bool "${2:?}")"; shift 2 ;;
+    --public-ssh-open) PUBLIC_SSH_OPEN="$(parse_bool "${2:?}")"; shift 2 ;;
+    --ssh-port) SSH_PORT="${2:?}"; shift 2 ;;
     --print-firewall-command) PRINT_FIREWALL_COMMAND="$(parse_bool "${2:?}")"; shift 2 ;;
     --apply-firewall) APPLY_FIREWALL="$(parse_bool "${2:?}")"; shift 2 ;;
+    --apply-ssh-firewall) APPLY_SSH_FIREWALL="$(parse_bool "${2:?}")"; shift 2 ;;
     --project) GCP_PROJECT="${2:?}"; shift 2 ;;
     --zone) GCP_ZONE="${2:?}"; shift 2 ;;
     --tpu-name) TPU_NAME="${2:?}"; shift 2 ;;
@@ -339,6 +351,10 @@ detect_gcp_metadata() {
 }
 
 detect_source_range() {
+  if [[ "$PUBLIC_JUPYTER_OPEN" == "yes" ]]; then
+    FIREWALL_SOURCE_RANGE="0.0.0.0/0"
+    return
+  fi
   if [[ "$FIREWALL_SOURCE_RANGE" != "auto" ]]; then
     return
   fi
@@ -569,6 +585,9 @@ print_firewall_commands() {
   cat <<EOF
 
 Firewall source ranges are the client IPs allowed to connect to public Jupyter.
+Use --public-jupyter-open yes to intentionally allow all IPv4 clients
+(0.0.0.0/0), which is convenient for groups but exposes the token login to the
+internet.
 If this script runs on the TPU VM, auto-detection may show the TPU VM egress IP,
 not your laptop IP. Override it with --firewall-source <YOUR_IP>/32 when needed.
 
@@ -585,6 +604,48 @@ To allow public Jupyter access, run from your local machine or Cloud Shell:
     --project $GCP_PROJECT}
 
 Prefer a narrow source range. Avoid 0.0.0.0/0 unless this is temporary.
+EOF
+}
+
+print_ssh_firewall_commands() {
+  [[ "$GENERATE_SHARE_SSH_KEY" == "yes" ]] || return 0
+  local ssh_source_range="$FIREWALL_SOURCE_RANGE"
+  if [[ "$PUBLIC_SSH_OPEN" == "yes" ]]; then
+    ssh_source_range="0.0.0.0/0"
+  elif [[ "$ssh_source_range" == "auto" ]]; then
+    ssh_source_range="<COLLABORATOR_IP_CIDR>"
+  fi
+  local rule_name="allow-tpu-ssh-$SSH_PORT"
+  local command=(
+    gcloud compute firewall-rules create "$rule_name"
+    --allow "tcp:$SSH_PORT"
+    --network default
+    --source-ranges "$ssh_source_range"
+  )
+  if [[ -n "$GCP_PROJECT" ]]; then
+    command+=(--project "$GCP_PROJECT")
+  fi
+  if [[ "$APPLY_SSH_FIREWALL" == "yes" ]]; then
+    log "Creating SSH firewall rule $rule_name"
+    if gcloud compute firewall-rules describe "$rule_name" ${GCP_PROJECT:+--project "$GCP_PROJECT"} >/dev/null 2>&1; then
+      run gcloud compute firewall-rules update "$rule_name" \
+        --allow "tcp:$SSH_PORT" \
+        --source-ranges "$ssh_source_range" \
+        ${GCP_PROJECT:+--project "$GCP_PROJECT"}
+    else
+      run "${command[@]}"
+    fi
+  fi
+  cat <<EOF
+
+Direct SSH also needs a GCP firewall rule for tcp:$SSH_PORT unless one already exists.
+For a wide research-group setup, use --public-ssh-open yes to print 0.0.0.0/0.
+
+  gcloud compute firewall-rules create $rule_name \\
+    --allow tcp:$SSH_PORT \\
+    --network default \\
+    --source-ranges $ssh_source_range${GCP_PROJECT:+ \\
+    --project $GCP_PROJECT}
 EOF
 }
 
@@ -630,6 +691,14 @@ generate_share_ssh_key() {
   else
     run ssh-keygen -t ed25519 -N "" -C "$SHARE_SSH_USER@tpu-dev-$ENV_NAME" -f "$SHARE_SSH_KEY_PATH"
   fi
+  if [[ "$DRY_RUN" != "yes" && -f "$SHARE_SSH_KEY_PATH.pub" ]]; then
+    log "Adding shareable SSH public key to local authorized_keys"
+    mkdir -p "$HOME/.ssh"
+    chmod 700 "$HOME/.ssh"
+    touch "$HOME/.ssh/authorized_keys"
+    chmod 600 "$HOME/.ssh/authorized_keys"
+    grep -qxF "$(cat "$SHARE_SSH_KEY_PATH.pub")" "$HOME/.ssh/authorized_keys" || cat "$SHARE_SSH_KEY_PATH.pub" >> "$HOME/.ssh/authorized_keys"
+  fi
 }
 
 print_share_ssh_instructions() {
@@ -638,6 +707,7 @@ print_share_ssh_instructions() {
   local command_file="$SHARE_SSH_KEY_PATH.add-to-tpu.sh"
   local ssh_target="${TPU_NAME:-<TPU_NAME>}"
   local ssh_zone="${GCP_ZONE:-<ZONE>}"
+  local ssh_host="${TPU_EXTERNAL_IP:-<TPU_EXTERNAL_IP>}"
   local project_arg=""
   local public_key_text="<PUBLIC_KEY>"
   [[ -n "$GCP_PROJECT" ]] && project_arg=" --project=$GCP_PROJECT"
@@ -659,16 +729,40 @@ Shareable SSH key:
   public key:  $pubkey_file
   add command: $command_file
 
-To authorize this key on the TPU VM, run:
+The public key has been added to this VM's ~/.ssh/authorized_keys.
+If you need to authorize it on all TPU workers, run:
 
   $command_file
 
-Then someone with the private key can connect with:
+Easy ways to share the private key:
+
+  cat $SHARE_SSH_KEY_PATH
+  scp $SHARE_SSH_KEY_PATH collaborator@host:~/Downloads/
+
+Send collaborators the private key file plus this plain SSH command, no gcloud
+needed:
+
+  chmod 600 ./$(basename "$SHARE_SSH_KEY_PATH")
+  ssh -i ./$(basename "$SHARE_SSH_KEY_PATH") -o IdentitiesOnly=yes -p $SSH_PORT $SHARE_SSH_USER@$ssh_host
+
+Owner gcloud SSH command, if needed:
 
   gcloud compute tpus tpu-vm ssh $ssh_target$project_arg --zone=$ssh_zone --ssh-key-file=$SHARE_SSH_KEY_PATH
 
 Share the private key only with people you trust. Remove the matching line from
 ~/.ssh/authorized_keys on the TPU VM to revoke access.
+EOF
+}
+
+print_marimo_summary() {
+  [[ "$ENABLE_MARIMO" == "yes" ]] || return 0
+  cat <<EOF
+
+Marimo:
+  systemctl --user status tpu-marimo.service
+  journalctl --user -u tpu-marimo.service -f
+  gcloud compute tpus tpu-vm ssh ${TPU_NAME:-<TPU_NAME>}${GCP_PROJECT:+ --project=$GCP_PROJECT} --zone=${GCP_ZONE:-<ZONE>} -- -L $MARIMO_PORT:127.0.0.1:$MARIMO_PORT
+  http://127.0.0.1:$MARIMO_PORT
 EOF
 }
 
@@ -718,8 +812,10 @@ main() {
   install_marimo_service
   generate_share_ssh_key
   print_firewall_commands
+  print_ssh_firewall_commands
   print_cloudflare
   print_share_ssh_instructions
+  print_marimo_summary
   print_summary
 }
 

@@ -66,10 +66,22 @@ Shared SSH key:
 ./install.sh --generate-share-ssh-key yes
 ```
 
-The installer creates an Ed25519 keypair and prints the command to append the
-public key to `~/.ssh/authorized_keys` on the TPU VM. Share the private key only
-with trusted collaborators and remove the public key from `authorized_keys` to
-revoke access.
+The installer creates an Ed25519 keypair and automatically adds the public key
+to the current VM's `~/.ssh/authorized_keys`. It prints the private key path,
+plain `ssh -i ... user@host` command for collaborators without `gcloud`, and an
+easy `cat <private-key>` command for copy/paste sharing. Share the private key
+only with trusted collaborators and remove the public key from `authorized_keys`
+to revoke access.
+
+If collaborators should use plain SSH from anywhere, also open SSH publicly:
+
+```bash
+./install.sh --generate-share-ssh-key yes --public-ssh-open yes --ssh-port 22
+```
+
+This prints a `gcloud compute firewall-rules create ... --allow tcp:<port>` command
+with `--source-ranges 0.0.0.0/0`. Use a narrower CIDR when you know the group IP
+ranges.
 
 Public Jupyter:
 
@@ -91,6 +103,15 @@ the command:
 ```bash
 ./install.sh --apply-firewall yes --firewall-source 203.0.113.10/32
 ```
+
+For a research group where the token URL should be reachable from anywhere:
+
+```bash
+./install.sh --public-jupyter yes --public-jupyter-open yes
+```
+
+This prints a firewall command with `--source-ranges 0.0.0.0/0`. It is public
+internet exposure, so rotate the token or stop the service when done.
 
 Remote kernel:
 
