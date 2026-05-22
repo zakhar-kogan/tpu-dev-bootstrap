@@ -9,7 +9,7 @@ DEFAULT_ENV_BASE="$HOME/.local/share/tpu-dev/envs"
 DEFAULT_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/tpu-dev"
 DEFAULT_JUPYTER_PORT="8888"
 DEFAULT_MARIMO_PORT="2718"
-DEFAULT_PACKAGE_GROUPS="core,tpu,research,viz"
+DEFAULT_PACKAGE_GROUPS="core,tpu,general-ds,graphs,nlp,cayley-graphs"
 DEFAULT_CAYLEYPY_SOURCE="git"
 DEFAULT_CAYLEYPY_GIT="git+https://github.com/cayleypy/cayleypy/"
 DEFAULT_CAYLEYPY_PIP="cayleypy"
@@ -56,6 +56,7 @@ GENERATE_SHARE_SSH_KEY="no"
 SHARE_SSH_USER="$USER"
 SHARE_SSH_KEY_PATH=""
 EXTRA_PIP=()
+EXTRA_INTERACTIVE_PACKAGES=()
 RECREATE="no"
 ASSUME_YES="no"
 DRY_RUN="no"
@@ -84,7 +85,7 @@ Options:
   --marimo-port PORT               Marimo port. Default: 2718.
   --public-marimo yes|no|ask       Bind Marimo to 0.0.0.0 or localhost. Default: ask (when Marimo enabled).
   --cloudflare-quick-tunnel yes|no Start a quick cloudflared tunnel command. Default: no.
-  --package-groups LIST            Comma list: core,tpu,research,viz,marimo,ui-demos,jax,dev.
+  --package-groups LIST            Comma list of: core, tpu, general-ds, graphs, nlp, llms, graphml, cayley-graphs, uis, dev.
   --extra-pip PACKAGE              Extra pip spec. Repeatable.
   --apt-packages PKG               Extra apt package to install. Repeatable.
   --cayleypy-source git|pip|none   Default: git.
@@ -147,6 +148,116 @@ prompt_yes_no() {
   read -r answer < /dev/tty || answer=""
   answer="${answer:-$default}"
   parse_bool "$answer"
+}
+
+interactive_checkbox_menu() {
+  local prompt="$1"
+  shift
+  local raw_options=("$@")
+  
+  local keys=()
+  local defaults=()
+  local desc=()
+  local selections=()
+  
+  local num_opts=${#raw_options[@]}
+  for ((i=0; i<num_opts; i++)); do
+    IFS='|' read -r k d des <<< "${raw_options[i]}"
+    keys[i]="$k"
+    defaults[i]="$d"
+    desc[i]="$des"
+    if [[ "$d" == "yes" ]]; then
+      selections[i]=1
+    else
+      selections[i]=0
+    fi
+  done
+  
+  local active=0
+  local key=""
+  
+  # Hide cursor, restore on exit
+  tput civis >/dev/tty 2>/dev/null || printf "\033[?25l" >/dev/tty
+  trap 'tput cnorm >/dev/tty 2>/dev/null || printf "\033[?25h" >/dev/tty' EXIT
+  
+  local active_print_done=0
+  
+  print_menu() {
+    if (( active_print_done > 0 )); then
+      printf "\033[%dA" "$num_opts" >/dev/tty
+    fi
+    for ((i=0; i<num_opts; i++)); do
+      local checkbox="[ ]"
+      if (( selections[i] == 1 )); then
+        checkbox="[\033[1;32mx\033[0m]"
+      fi
+      
+      if (( i == active )); then
+        printf " \033[1;36m>\033[0m %b \033[1m%-14s\033[0m - \033[36m%s\033[0m\033[K\n" "$checkbox" "${keys[i]}" "${desc[i]}" >/dev/tty
+      else
+        printf "   %b %-14s - %s\033[K\n" "$checkbox" "${keys[i]}" "${desc[i]}" >/dev/tty
+      fi
+    done
+    active_print_done=1
+  }
+  
+  printf "\033[1;34m==>\033[0m \033[1m%s\033[0m\n" "$prompt" >/dev/tty
+  printf "    Use \033[1m↑/↓\033[0m (or \033[1mj/k\033[0m) to navigate, \033[1mSpace\033[0m to toggle, \033[1mEnter\033[0m to confirm.\n" >/dev/tty
+  
+  print_menu
+  
+  while true; do
+    read -r -s -n 1 key < /dev/tty 2>/dev/null || true
+    
+    if [[ "$key" == $'\e' ]]; then
+      read -r -s -n 2 -t 0.1 key < /dev/tty 2>/dev/null || true
+      if [[ "$key" == "[A" ]]; then
+        if (( active > 0 )); then
+          (( active-- ))
+          print_menu
+        fi
+      elif [[ "$key" == "[B" ]]; then
+        if (( active < num_opts - 1 )); then
+          (( active++ ))
+          print_menu
+        fi
+      fi
+    elif [[ "$key" == "k" ]]; then
+      if (( active > 0 )); then
+        (( active-- ))
+        print_menu
+      fi
+    elif [[ "$key" == "j" ]]; then
+      if (( active < num_opts - 1 )); then
+        (( active++ ))
+        print_menu
+      fi
+    elif [[ "$key" == " " ]]; then
+      if (( selections[active] == 1 )); then
+        selections[active]=0
+      else
+        selections[active]=1
+      fi
+      print_menu
+    elif [[ "$key" == "" ]]; then
+      break
+    fi
+  done
+  
+  tput cnorm >/dev/tty 2>/dev/null || printf "\033[?25h" >/dev/tty
+  trap - EXIT
+  
+  local out=""
+  for ((i=0; i<num_opts; i++)); do
+    if (( selections[i] == 1 )); then
+      if [[ -z "$out" ]]; then
+        out="${keys[i]}"
+      else
+        out="$out,${keys[i]}"
+      fi
+    fi
+  done
+  echo "$out"
 }
 
 run() {
@@ -330,6 +441,46 @@ if have_tty && [[ "$ASSUME_YES" != "yes" ]]; then
     fi
   fi
   CLOUDFLARE_TUNNEL="$(prompt_yes_no "Start/print Cloudflare quick tunnel" "$CLOUDFLARE_TUNNEL")"
+
+  # Composable Checkbox menu for package groups!
+  local options=(
+    "core|$( [[ ",$PACKAGE_GROUPS," == *",core,"* ]] && echo yes || echo no )|JupyterLab, Jupyter Server, IPython kernel, packaging basics"
+    "tpu|$( [[ ",$PACKAGE_GROUPS," == *",tpu,"* ]] && echo yes || echo no )|torch, torch_xla[tpu], numpy"
+    "general-ds|$( [[ ",$PACKAGE_GROUPS," == *",general-ds,"* ]] && echo yes || echo no )|pandas, scipy, numba, polars, modin, daft, scikit-learn"
+    "graphs|$( [[ ",$PACKAGE_GROUPS," == *",graphs,"* ]] && echo yes || echo no )|networkx, python-louvain, graphviz"
+    "nlp|$( [[ ",$PACKAGE_GROUPS," == *",nlp,"* ]] && echo yes || echo no )|gensim, spacy"
+    "llms|$( [[ ",$PACKAGE_GROUPS," == *",llms,"* ]] && echo yes || echo no )|transformers, accelerate, datasets, unsloth"
+    "graphml|$( [[ ",$PACKAGE_GROUPS," == *",graphml,"* ]] && echo yes || echo no )|torch-geometric, pyg"
+    "cayley-graphs|$( [[ ",$PACKAGE_GROUPS," == *",cayley-graphs,"* ]] && echo yes || echo no )|cayleypy (git or pypi)"
+    "uis|$( [[ ",$PACKAGE_GROUPS," == *",uis,"* ]] && echo yes || echo no )|streamlit, plotly, dash, holoviz, panel, bokeh, holoviews, hvplot"
+    "dev|$( [[ ",$PACKAGE_GROUPS," == *",dev,"* ]] && echo yes || echo no )|ruff, pytest, black, pre-commit"
+  )
+  PACKAGE_GROUPS="$(interactive_checkbox_menu "Select Python package groups to install:" "${options[@]}")"
+
+  # Check each selected package group for optional packages
+  local group selected_opts opt_pkg
+  IFS=',' read -r -a selected_groups <<< "$PACKAGE_GROUPS"
+  for group in "${selected_groups[@]}"; do
+    local optional_pkgs=()
+    while IFS= read -r opt_pkg; do
+      [[ -n "$opt_pkg" ]] && optional_pkgs+=("$opt_pkg")
+    done < <(get_optional_packages "$group")
+    
+    if (( ${#optional_pkgs[@]} > 0 )); then
+      local opt_menu_options=()
+      for opt_pkg in "${optional_pkgs[@]}"; do
+        opt_menu_options+=("$opt_pkg|no|Optional package from $group group")
+      done
+      
+      selected_opts="$(interactive_checkbox_menu "Select optional packages to install for group [$group]:" "${opt_menu_options[@]}")"
+      if [[ -n "$selected_opts" ]]; then
+        IFS=',' read -r -a opts_array <<< "$selected_opts"
+        for opt_pkg in "${opts_array[@]}"; do
+          EXTRA_INTERACTIVE_PACKAGES+=("$opt_pkg")
+        done
+      fi
+    fi
+  done
 fi
 
 [[ "$PUBLIC_JUPYTER" == "ask" ]] && PUBLIC_JUPYTER="yes"
@@ -448,37 +599,88 @@ create_env() {
 
 group_packages() {
   local group="$1"
-  case "$group" in
-    core)
-      printf '%s\n' pip setuptools wheel ipykernel jupyterlab jupyter-server jupyterlab-git
-      ;;
-    tpu)
-      printf '%s\n' numpy "torch==$TORCH_VERSION" "torch_xla[tpu]==$TORCH_XLA_VERSION"
-      ;;
-    research)
-      printf '%s\n' pandas scipy numba transformers datasets accelerate networkx tqdm rich
-      ;;
-    viz)
-      printf '%s\n' matplotlib seaborn
-      ;;
-    marimo)
-      printf '%s\n' marimo
-      ;;
-    ui-demos)
-      printf '%s\n' streamlit plotly dash panel bokeh holoviews hvplot
-      ;;
-    jax)
-      printf '%s\n' jax jaxlib
-      ;;
-    dev)
-      printf '%s\n' ruff pytest black pre-commit
-      ;;
-    "")
-      ;;
-    *)
-      warn "Unknown package group: $group"
-      ;;
-  esac
+  local local_file="$SCRIPT_DIR/packages/$group.txt"
+  local fallback_url="https://raw.githubusercontent.com/zakhar-kogan/tpu-dev-bootstrap/main/packages/$group.txt"
+  
+  if [[ -f "$local_file" ]]; then
+    while IFS= read -r line; do
+      line="${line%%#*}"
+      line="$(echo -e "${line}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      if [[ -n "$line" ]]; then
+        eval echo "\"$line\""
+      fi
+    done < "$local_file"
+  else
+    # Try downloading it
+    local content
+    if content="$(curl -fsS --connect-timeout 2 --max-time 5 "$fallback_url" 2>/dev/null)"; then
+      while IFS= read -r line; do
+        line="${line%%#*}"
+        line="$(echo -e "${line}" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+        if [[ -n "$line" ]]; then
+          eval echo "\"$line\""
+        fi
+      done <<< "$content"
+    else
+      # Offline / missing fallback list
+      case "$group" in
+        core)
+          printf '%s\n' pip setuptools wheel ipykernel jupyterlab jupyter-server jupyterlab-git
+          ;;
+        tpu)
+          printf '%s\n' numpy "torch==$TORCH_VERSION" "torch_xla[tpu]==$TORCH_XLA_VERSION"
+          ;;
+        general-ds)
+          printf '%s\n' pandas scikit-learn numba scipy
+          ;;
+        graphs)
+          printf '%s\n' networkx python-louvain graphviz
+          ;;
+        nlp)
+          printf '%s\n' gensim spacy
+          ;;
+        llms)
+          printf '%s\n' transformers accelerate datasets unsloth
+          ;;
+        graphml)
+          printf '%s\n' torch-geometric pyg
+          ;;
+        cayley-graphs)
+          printf '%s\n' cayleypy
+          ;;
+        uis)
+          printf '%s\n' streamlit panel
+          ;;
+        dev)
+          printf '%s\n' ruff pytest black pre-commit
+          ;;
+      esac
+    fi
+  fi
+}
+
+get_optional_packages() {
+  local group="$1"
+  local local_file="$SCRIPT_DIR/packages/$group.txt"
+  local fallback_url="https://raw.githubusercontent.com/zakhar-kogan/tpu-dev-bootstrap/main/packages/$group.txt"
+  
+  local content=""
+  if [[ -f "$local_file" ]]; then
+    content="$(cat "$local_file")"
+  else
+    content="$(curl -fsS --connect-timeout 2 --max-time 5 "$fallback_url" 2>/dev/null || true)"
+  fi
+  
+  local pattern='^[[:space:]]*#[[:space:]]*([^[:space:]]+)[[:space:]]*$'
+  
+  if [[ -n "$content" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" =~ $pattern ]]; then
+        local pkg="${BASH_REMATCH[1]}"
+        eval echo "\"$pkg\""
+      fi
+    done <<< "$content"
+  fi
 }
 
 install_packages() {
@@ -499,6 +701,7 @@ install_packages() {
     *) die "Unknown cayleypy source: $CAYLEYPY_SOURCE" ;;
   esac
   packages+=("${EXTRA_PIP[@]}")
+  packages+=("${EXTRA_INTERACTIVE_PACKAGES[@]}")
   ((${#packages[@]} > 0)) || return 0
   run uv pip install --python "$VENV_DIR/bin/python" "${packages[@]}" -f https://storage.googleapis.com/libtpu-releases/index.html
 }
@@ -618,6 +821,152 @@ WantedBy=default.target"
     systemctl --user enable tpu-marimo.service
     # Always restart so a re-run picks up changed flags (bind IP, port, token).
     systemctl --user restart tpu-marimo.service
+  fi
+}
+
+install_tpu_workspace_tools() {
+  log "Installing TPU workspace and status monitoring tools"
+  run mkdir -p "$HOME/.local/bin"
+  
+  # 1. Write tpu-workspace
+  if [[ "$DRY_RUN" != "yes" ]]; then
+    cat <<'EOF' > "$HOME/.local/bin/tpu-workspace"
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SESSION_NAME="tpu-dev"
+
+if ! command -v tmux &>/dev/null; then
+  echo "tmux is not installed! Installing tmux..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update && sudo apt-get install -y tmux
+  else
+    echo "Could not install tmux automatically. Please install it using your package manager."
+    exit 1
+  fi
+fi
+
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+  echo "Attaching to existing tmux session: $SESSION_NAME"
+  exec tmux attach-session -t "$SESSION_NAME"
+fi
+
+echo "Creating new tmux workspace session: $SESSION_NAME"
+tmux new-session -d -s "$SESSION_NAME" -n "dev"
+
+tmux new-window -t "$SESSION_NAME" -n "services"
+if command -v btop &>/dev/null; then
+  tmux send-keys -t "$SESSION_NAME:services.0" "btop" C-m
+elif command -v htop &>/dev/null; then
+  tmux send-keys -t "$SESSION_NAME:services.0" "htop" C-m
+else
+  tmux send-keys -t "$SESSION_NAME:services.0" "top" C-m
+fi
+
+tmux split-window -h -t "$SESSION_NAME:services"
+tmux send-keys -t "$SESSION_NAME:services.1" "journalctl --user -u tpu-jupyter -f -n 100" C-m
+
+if systemctl --user is-active tpu-marimo.service &>/dev/null; then
+  tmux split-window -v -t "$SESSION_NAME:services.1"
+  tmux send-keys -t "$SESSION_NAME:services.2" "journalctl --user -u tpu-marimo -f -n 100" C-m
+fi
+
+tmux select-window -t "$SESSION_NAME:dev"
+exec tmux attach-session -t "$SESSION_NAME"
+EOF
+    chmod +x "$HOME/.local/bin/tpu-workspace"
+  fi
+
+  # 2. Write tpu-status
+  if [[ "$DRY_RUN" != "yes" ]]; then
+    cat <<'EOF' > "$HOME/.local/bin/tpu-status"
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+BOLD="\033[1m"
+GREEN="\033[1;32m"
+CYAN="\033[1;36m"
+YELLOW="\033[1;33m"
+RED="\033[1;31m"
+RESET="\033[0m"
+
+printf "${CYAN}================================================================${RESET}\n"
+printf "  ${BOLD}⚡ TPU-DEV SYSTEM & SERVICE STATUS ⚡${RESET}\n"
+printf "${CYAN}================================================================${RESET}\n"
+
+printf " ${BOLD}🖥️  System Metrics:${RESET}\n"
+cpu_load=$(top -bn1 2>/dev/null | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1}')
+[[ -z "$cpu_load" ]] && cpu_load="N/A"
+printf "   • CPU Load:  ${BOLD}%s%%${RESET}\n" "$cpu_load"
+
+mem_total=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}')
+mem_used=$(free -m 2>/dev/null | awk '/Mem:/ {print $3}')
+if [[ -n "$mem_total" && "$mem_total" -gt 0 ]]; then
+  mem_pct=$(( mem_used * 100 / mem_total ))
+  printf "   • Memory:    ${BOLD}%sMB / %sMB (%s%%)${RESET}\n" "$mem_used" "$mem_total" "$mem_pct"
+else
+  printf "   • Memory:    ${BOLD}N/A${RESET}\n"
+fi
+
+disk_pct=$(df -h / 2>/dev/null | awk 'NR==2 {print $5}')
+[[ -z "$disk_pct" ]] && disk_pct="N/A"
+printf "   • Disk:      ${BOLD}%s used${RESET}\n" "$disk_pct"
+
+printf "\n ${BOLD}🔌 Services:${RESET}\n"
+if systemctl --user is-active tpu-jupyter.service &>/dev/null; then
+  printf "   • Jupyter:   ${GREEN}Active${RESET}\n"
+else
+  printf "   • Jupyter:   ${RED}Inactive${RESET}\n"
+fi
+
+if systemctl --user is-active tpu-marimo.service &>/dev/null; then
+  printf "   • Marimo:    ${GREEN}Active${RESET}\n"
+else
+  printf "   • Marimo:    ${RED}Inactive${RESET}\n"
+fi
+
+if [[ -f "$HOME/.config/tpu-dev/secrets.env" ]]; then
+  # shellcheck disable=SC1090
+  source "$HOME/.config/tpu-dev/secrets.env"
+  printf "   • Jupyter Port: ${BOLD}%s${RESET}\n" "${JUPYTER_PORT:-8888}"
+  if [[ -n "${MARIMO_PORT:-}" ]]; then
+    printf "   • Marimo Port:  ${BOLD}%s${RESET}\n" "$MARIMO_PORT"
+  fi
+fi
+
+printf "\n ${BOLD}🐍 Active Python/ML Processes:${RESET}\n"
+pids=$(pgrep -f "python" || true)
+if [[ -n "$pids" ]]; then
+  ps -o pid,ppid,cmd -p $pids 2>/dev/null | grep -v grep | head -n 15 | while read -r line; do
+    printf "   • %s\n" "$line"
+  done
+else
+  printf "   • No active Python processes found.\n"
+fi
+
+printf "\n ${BOLD}💡 Shortcuts:${RESET}\n"
+printf "   • Open tmux workspace:   ${BOLD}tpu-workspace${RESET}\n"
+printf "   • View Jupyter status:   ${BOLD}systemctl --user status tpu-jupyter${RESET}\n"
+printf "   • View Jupyter logs:     ${BOLD}journalctl --user -u tpu-jupyter -f -n 50${RESET}\n"
+printf "${CYAN}================================================================${RESET}\n"
+EOF
+    chmod +x "$HOME/.local/bin/tpu-status"
+  fi
+
+  # 3. Add Welcome banner to .bashrc
+  if [[ "$DRY_RUN" != "yes" ]]; then
+    local entry_check="tpu-status"
+    if ! grep -q "$entry_check" "$HOME/.bashrc" 2>/dev/null; then
+      {
+        printf '\n# TPU development environment welcome message\n'
+        printf 'if [[ -t 0 && -t 1 ]]; then\n'
+        printf '  echo -e "\\n\\033[1;36m⚡ Welcome to your TPU Development Environment! ⚡\\033[0m"\n'
+        printf '  echo -e "   • Run \\033[1mcustom package lists\\033[0m: modify ~/.local/share/tpu-dev/envs/tpu-dev (or similar)\\n"\n'
+        printf '  echo -e "   • Run \\033[1mtpu-status\\033[0m to view active services and metrics."\n'
+        printf '  echo -e "   • Run \\033[1mtpu-workspace\\033[0m to enter your tmux log and shell panel.\\n"\n'
+        printf 'fi\n'
+      } >> "$HOME/.bashrc"
+    fi
   fi
 }
 
@@ -921,6 +1270,12 @@ print_summary() {
     printf '  logs:    journalctl --user -u tpu-marimo.service -f\n'
   fi
 
+  # ── Workspace & Monitoring ─────────────────────────────────────
+  printf '\n%s\n' "$SEP"
+  printf '⚡  Workspace & Monitoring\n\n'
+  printf '  status:    tpu-status     (view live CPU, memory, and active processes)\n'
+  printf '  workspace: tpu-workspace  (starts/attaches tmux panel with dev shell and service logs)\n'
+
   printf '\n%s\n\n' "$SEP"
 }
 
@@ -936,6 +1291,7 @@ main() {
   register_kernel
   install_jupyter_service
   install_marimo_service
+  install_tpu_workspace_tools
   generate_share_ssh_key
   print_firewall_commands
   print_ssh_firewall_commands

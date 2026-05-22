@@ -1,0 +1,7 @@
+pip
+setuptools
+wheel
+ipykernel
+jupyterlab
+jupyter-server
+jupyterlab-git

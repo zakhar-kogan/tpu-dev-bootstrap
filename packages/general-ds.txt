@@ -1,0 +1,7 @@
+pandas
+# modin
+# daft
+# polars
+scikit-learn
+numba
+scipy
