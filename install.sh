@@ -255,6 +255,16 @@ PY
 )"
   eval "$rendered"
 }
+# Load previously configured ports if available to use as defaults
+CONFIG_HOME="$DEFAULT_CONFIG_HOME"
+SECRETS_FILE="$CONFIG_HOME/secrets.env"
+if [[ -f "$SECRETS_FILE" ]]; then
+  _saved_port="$(grep -E '^JUPYTER_PORT=' "$SECRETS_FILE" | cut -d= -f2- | tr -d \'\")"
+  [[ -n "$_saved_port" ]] && JUPYTER_PORT="$_saved_port"
+  _saved_port="$(grep -E '^MARIMO_PORT=' "$SECRETS_FILE" | cut -d= -f2- | tr -d \'\")"
+  [[ -n "$_saved_port" ]] && MARIMO_PORT="$_saved_port"
+  unset _saved_port
+fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -495,10 +505,19 @@ install_packages() {
 
 generate_secret() {
   run mkdir -p "$CONFIG_HOME" "$LOG_DIR"
+  local saved_jupyter_port="$JUPYTER_PORT"
+  local saved_marimo_port="$MARIMO_PORT"
+  local saved_env_dir="$ENV_DIR"
+
   if [[ -f "$SECRETS_FILE" ]]; then
     # shellcheck disable=SC1090
     source "$SECRETS_FILE"
   fi
+
+  JUPYTER_PORT="$saved_jupyter_port"
+  MARIMO_PORT="$saved_marimo_port"
+  ENV_DIR="$saved_env_dir"
+
   if [[ -z "${JUPYTER_TOKEN:-}" ]]; then
     JUPYTER_TOKEN="$("$VENV_DIR/bin/python" - <<'PY'
 import secrets
