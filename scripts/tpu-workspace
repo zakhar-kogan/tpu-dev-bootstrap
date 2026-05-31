@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SESSION_NAME="tpu-dev"
+
+if ! command -v tmux &>/dev/null; then
+  echo "tmux is not installed! Installing tmux..."
+  if command -v apt-get &>/dev/null; then
+    sudo apt-get update && sudo apt-get install -y tmux
+  else
+    echo "Could not install tmux automatically. Please install it using your package manager."
+    exit 1
+  fi
+fi
+
+if tmux has-session -t "$SESSION_NAME" 2>/dev/null; then
+  echo "Attaching to existing tmux session: $SESSION_NAME"
+  exec tmux attach-session -t "$SESSION_NAME"
+fi
+
+echo "Creating new tmux workspace session: $SESSION_NAME"
+tmux new-session -d -s "$SESSION_NAME" -n "dev"
+
+tmux new-window -t "$SESSION_NAME" -n "services"
+if command -v btop &>/dev/null; then
+  tmux send-keys -t "$SESSION_NAME:services.0" "btop" C-m
+elif command -v htop &>/dev/null; then
+  tmux send-keys -t "$SESSION_NAME:services.0" "htop" C-m
+else
+  tmux send-keys -t "$SESSION_NAME:services.0" "top" C-m
+fi
+
+tmux split-window -h -t "$SESSION_NAME:services"
+tmux send-keys -t "$SESSION_NAME:services.1" "journalctl --user -u tpu-jupyter -f -n 100" C-m
+
+if systemctl --user is-active tpu-marimo.service &>/dev/null; then
+  tmux split-window -v -t "$SESSION_NAME:services.1"
+  tmux send-keys -t "$SESSION_NAME:services.2" "journalctl --user -u tpu-marimo -f -n 100" C-m
+fi
+
+tmux select-window -t "$SESSION_NAME:dev"
+exec tmux attach-session -t "$SESSION_NAME"

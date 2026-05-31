@@ -1,21 +1,21 @@
 # Package Groups
 
-`install.sh` currently defines package groups inline so the one-file installer
-works when piped from GitHub.
+Each `.txt` file defines a package group that `install.sh` installs via `uv pip install`.
+Lines starting with `#` are comments. Variable references (`$TORCH_VERSION`) are
+expanded by the installer using explicit substitution.
 
-These files are documentation anchors for the defaults and can be promoted into
-machine-read constraints once a tested TPU image/runtime matrix is established.
-
-Default groups:
+Default groups (installed unless overridden via `--package-groups`):
 
 - `core`: JupyterLab, Jupyter Server, IPython kernel, packaging basics.
 - `tpu`: `torch`, `torch_xla[tpu]`, `numpy`.
-- `research`: pandas, scipy, numba, transformers, datasets, graph helpers.
-- `viz`: matplotlib, seaborn.
+- `general-ds`: pandas, scikit-learn, numba, scipy.
+- `graphs`: networkx, python-louvain, graphviz.
+- `nlp`: gensim, spacy.
+- `cayley-graphs`: cayleypy.
 
-Optional groups:
+Optional groups (add via `--package-groups core,tpu,...,llms`):
 
-- `marimo`
-- `ui-demos`: streamlit, plotly, dash, panel, bokeh, holoviews, hvplot.
-- `jax`
+- `llms`: transformers, accelerate, datasets, unsloth.
+- `graphml`: torch-geometric, pyg.
+- `uis`: streamlit, panel.
 - `dev`: ruff, pytest, black, pre-commit.

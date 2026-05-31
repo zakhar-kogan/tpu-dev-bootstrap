@@ -10,13 +10,13 @@ systemd.
 From a TPU VM:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zakhar-kogan/tpu-dev-bootstrap/main/bootstrap.sh | bash
 ```
 
 With flags:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/install.sh | bash -s -- \
+curl -fsSL https://raw.githubusercontent.com/zakhar-kogan/tpu-dev-bootstrap/main/bootstrap.sh | bash -s -- \
   --python 3.10 \
   --env-name cayley \
   --jupyter-port 8888 \
@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/install.sh | bash
 Research group setup (public Jupyter + Marimo + SSH key for collaborators):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/install.sh | bash -s -- \
+curl -fsSL https://raw.githubusercontent.com/zakhar-kogan/tpu-dev-bootstrap/main/bootstrap.sh | bash -s -- \
   --public-jupyter yes \
   --marimo yes \
   --public-marimo yes \
@@ -48,9 +48,40 @@ This will:
 With config:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/install.sh | bash -s -- \
-  --config https://raw.githubusercontent.com/<org>/<repo>/main/tpu-setup.example.yaml
+curl -fsSL https://raw.githubusercontent.com/zakhar-kogan/tpu-dev-bootstrap/main/bootstrap.sh | bash -s -- \
+  --config tpu-setup.example.env
 ```
+
+If you already have the repo cloned:
+
+```bash
+./install.sh [options]
+```
+
+## Configuration
+
+The installer accepts a `.env` file via `--config`:
+
+```env
+PYTHON_VERSION=3.10
+ENV_NAME=tpu-dev
+ENV_BASE=~/.local/share/tpu-dev/envs
+
+JUPYTER_PORT=8888
+PUBLIC_JUPYTER=yes
+
+ENABLE_MARIMO=no
+MARIMO_PORT=2718
+
+PACKAGE_GROUPS=core,tpu,general-ds,graphs,nlp,cayley-graphs
+
+TORCH_VERSION=2.9.0
+TORCH_XLA_VERSION=2.9.0
+
+EXTRA_PIP=einops,triton
+```
+
+CLI flags override config file values. See `./install.sh --help` for all options.
 
 ## Defaults
 
@@ -61,7 +92,7 @@ curl -fsSL https://raw.githubusercontent.com/<org>/<repo>/main/install.sh | bash
 - Marimo disabled by default; when enabled its public-bind flag mirrors `--public-jupyter` unless `--public-marimo` is set explicitly
 - TPU name, zone, project, and external IP are auto-detected from GCP metadata
 - Kernel registered as `TPU Dev (<env-name>)`
-- Cloudflare quick tunnel optional
+- Cloudflare quick tunnel optional (print-only)
 - No GCP firewall rules are created automatically
 - Existing environments are reused unless `--recreate` is passed
 
@@ -124,30 +155,7 @@ gcloud compute tpus tpu-vm ssh <TPU_NAME> --zone=<ZONE> -- \
 
 Then open the URL printed by the installer.
 
-**Shared SSH key (legacy flag reference)**
-
-```bash
-./install.sh --generate-share-ssh-key yes
-```
-
-The installer creates an Ed25519 keypair and automatically adds the public key
-to the current VM's `~/.ssh/authorized_keys`. It prints the private key path,
-plain `ssh -i ... user@host` command for collaborators without `gcloud`, and an
-easy `cat <private-key>` command for copy/paste sharing. Share the private key
-only with trusted collaborators and remove the public key from `authorized_keys`
-to revoke access.
-
-If collaborators should use plain SSH from anywhere, also open SSH publicly:
-
-```bash
-./install.sh --generate-share-ssh-key yes --public-ssh-open yes --ssh-port 22
-```
-
-This prints a `gcloud compute firewall-rules create ... --allow tcp:<port>` command
-with `--source-ranges 0.0.0.0/0`. Use a narrower CIDR when you know the group IP
-ranges.
-
-## Extra packages
+## Extra Packages
 
 ### Extra pip packages
 
@@ -158,12 +166,10 @@ standard groups:
 ./install.sh --extra-pip einops --extra-pip triton
 ```
 
-Or in the YAML config:
+Or in the `.env` config:
 
-```yaml
-extra_pip:
-  - einops
-  - triton
+```env
+EXTRA_PIP=einops,triton
 ```
 
 ### Extra apt/system packages
@@ -188,15 +194,11 @@ If `--public-marimo` is not set, it defaults to the same value as
 Marimo port but forgetting `--public-marimo yes` — the service will still only
 listen on `127.0.0.1` and refuse external connections.
 
-Public Jupyter:
+### Public Jupyter
 
 The installer can bind JupyterLab to `0.0.0.0` with a generated token. It prints
 firewall commands to run from your laptop or Cloud Shell. Prefer restricting
 `--source-ranges` to your current IP/CIDR.
-
-`--source-ranges` means "which client IPs are allowed to connect." When the
-installer runs on the TPU VM, automatic detection may see the TPU VM's outbound
-IP, not your laptop IP. Prefer passing your local IP explicitly:
 
 ```bash
 ./install.sh --firewall-source 203.0.113.10/32
@@ -218,50 +220,35 @@ For a research group where the token URL should be reachable from anywhere:
 This prints a firewall command with `--source-ranges 0.0.0.0/0`. It is public
 internet exposure, so rotate the token or stop the service when done.
 
-If Marimo is enabled, the installer also prints a concrete public Marimo URL and
-a separate Marimo firewall command for the Marimo port.
-
-Remote kernel:
-
-Use the printed Jupyter URL and token from VS Code, JupyterLab, or another
-Jupyter client, then select the `TPU Dev (<env-name>)` kernel.
-
 ## Package Groups
 
 Default groups:
 
-- `core`: JupyterLab and kernel basics.
+- `core`: JupyterLab, Jupyter Server, IPython kernel, packaging basics.
 - `tpu`: PyTorch/XLA and TPU runtime support.
-- `research`: pandas, scipy, numba, transformers, datasets, graph helpers.
-- `viz`: matplotlib and seaborn.
+- `general-ds`: pandas, scikit-learn, numba, scipy.
+- `graphs`: networkx, python-louvain, graphviz.
+- `nlp`: gensim, spacy.
+- `cayley-graphs`: cayleypy.
 
 Optional groups:
 
-- `marimo`
-- `ui-demos`
-- `jax`
-- `dev`
+- `llms`: transformers, accelerate, datasets, unsloth.
+- `graphml`: torch-geometric, pyg.
+- `uis`: streamlit, panel.
+- `dev`: ruff, pytest, black, pre-commit.
 
 Example:
 
 ```bash
-./install.sh --package-groups core,tpu,research,viz,marimo,ui-demos
+./install.sh --package-groups core,tpu,general-ds,llms,dev
 ```
-
-`cayleypy` defaults to GitHub install:
-
-```yaml
-cayleypy_source: git
-cayleypy_git: "git+https://github.com/cayleypy/cayleypy/"
-```
-
-Set `cayleypy_source: pip` to install from PyPI, or `none` to skip.
 
 PyTorch and PyTorch/XLA are pinned by default and should stay aligned:
 
-```yaml
-torch_version: "2.9.0"
-torch_xla_version: "2.9.0"
+```env
+TORCH_VERSION=2.9.0
+TORCH_XLA_VERSION=2.9.0
 ```
 
 ## Service Commands
@@ -270,7 +257,8 @@ torch_xla_version: "2.9.0"
 systemctl --user status tpu-jupyter.service
 journalctl --user -u tpu-jupyter.service -f
 systemctl --user restart tpu-jupyter.service
-scripts/status.sh
+tpu-status
+tpu-workspace
 ```
 
 Token and env metadata are stored in:
@@ -287,20 +275,41 @@ Run this inside the installed environment:
 python scripts/tpu-smoke.py
 ```
 
-## Docker
+## Docker (unsupported)
 
-Docker is optional. It is useful for isolated workloads, but the host installer
-is the main supported path for Jupyter/systemd.
+Docker is not a supported installation path. If you need a container, run
+JupyterLab manually:
 
 ```bash
-docker build -t tpu-dev-bootstrap:latest docker
-docker/run-tpu-container.sh
+docker run --rm -it --privileged --net=host \
+  -v "$PWD:/workspace" \
+  python:3.10-slim \
+  bash -c "pip install jupyterlab torch 'torch_xla[tpu]' -f https://storage.googleapis.com/libtpu-releases/index.html && jupyter lab --ip=0.0.0.0 --no-browser"
 ```
 
-TPU containers generally need host networking and privileged access:
+## Project Structure
 
-```bash
-docker run --privileged --net=host ...
+```
+tpu-dev-bootstrap/
+├── bootstrap.sh              # Thin curl|bash entry point
+├── install.sh                # Main installer (sources lib/*.sh)
+├── tpu-setup.example.env     # Example configuration
+├── lib/
+│   ├── ui.sh                 # Logging, prompts, parse helpers
+│   ├── config.sh             # Config loading (.env)
+│   ├── env.sh                # System deps, uv, venv creation
+│   ├── packages.sh           # Package group loading and install
+│   ├── services.sh           # Systemd service templating
+│   ├── firewall.sh           # GCP firewall rule helpers
+│   ├── ssh.sh                # SSH key generation
+│   └── summary.sh            # Final status output
+├── packages/                 # Package group definitions (.txt)
+├── scripts/
+│   ├── tpu-workspace         # tmux workspace launcher
+│   ├── tpu-status            # System/service status dashboard
+│   ├── tpu-banner.sh         # Login banner (sourced from .bashrc)
+│   └── tpu-smoke.py          # TPU verification script
+└── systemd/                  # Service unit templates
 ```
 
 ## Security Notes
@@ -309,6 +318,6 @@ docker run --privileged --net=host ...
 - No wildcard CORS configuration.
 - Public Jupyter is token-protected, but still should be exposed only to trusted
   IP ranges.
-- Firewall rules are printed, not applied.
+- Firewall rules are printed, not applied (unless `--apply-firewall yes`).
 - Re-running the installer reuses the environment; destructive rebuild requires
   `--recreate`.

@@ -6,7 +6,7 @@ After=network-online.target
 Type=simple
 WorkingDirectory={{ENV_DIR}}
 Environment=PATH={{VENV_DIR}}/bin:{{HOME}}/.local/bin:{{HOME}}/.cargo/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart={{VENV_DIR}}/bin/marimo edit --host 127.0.0.1 --port {{MARIMO_PORT}} --headless
+ExecStart={{VENV_DIR}}/bin/marimo edit --host {{BIND_IP}} --port {{MARIMO_PORT}} --headless --token --token-password={{MARIMO_TOKEN}}
 Restart=on-failure
 RestartSec=5
 
