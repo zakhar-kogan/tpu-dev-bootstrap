@@ -177,6 +177,7 @@ if have_tty && [[ "$ASSUME_YES" != "yes" ]]; then
     fi
   fi
   CLOUDFLARE_TUNNEL="$(prompt_yes_no "Print Cloudflare quick tunnel command" "$CLOUDFLARE_TUNNEL")"
+  GENERATE_SHARE_SSH_KEY="$(prompt_yes_no "Generate shareable SSH keypair" "$GENERATE_SHARE_SSH_KEY")"
   select_groups
 fi
 
