@@ -276,7 +276,7 @@ JupyterLab manually:
 docker run --rm -it --privileged --net=host \
   -v "$PWD:/workspace" \
   python:3.10-slim \
-  bash -c "pip install jupyterlab torch 'torch_xla[tpu]' -f https://storage.googleapis.com/libtpu-releases/index.html && jupyter lab --ip=0.0.0.0 --no-browser"
+  bash -c "pip install jupyterlab torch 'torch_xla[tpu]' 'jax[tpu]' -f https://storage.googleapis.com/libtpu-releases/index.html -f https://storage.googleapis.com/jax-releases/libtpu_releases.html && jupyter lab --ip=0.0.0.0 --no-browser"
 ```
 
 ## Project Structure

@@ -58,7 +58,7 @@ select_groups() {
   local all_groups=(core tpu general-ds graphs nlp cayley-graphs llms graphml uis dev)
   local descriptions=(
     "JupyterLab, Jupyter Server, IPython kernel, packaging basics"
-    "torch, torch_xla[tpu], numpy"
+    "torch, torch_xla[tpu], jax[tpu], numpy"
     "pandas, scikit-learn, numba, scipy"
     "networkx, python-louvain, graphviz"
     "gensim, spacy"

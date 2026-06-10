@@ -27,7 +27,7 @@ group_packages() {
         printf '%s\n' pip setuptools wheel ipykernel jupyterlab jupyter-server jupyterlab-git
         ;;
       tpu)
-        printf '%s\n' numpy "torch==$TORCH_VERSION" "torch_xla[tpu]==$TORCH_XLA_VERSION"
+        printf '%s\n' numpy "torch==$TORCH_VERSION" "torch_xla[tpu]==$TORCH_XLA_VERSION" "jax[tpu]"
         ;;
       general-ds)
         printf '%s\n' pandas scikit-learn numba scipy
@@ -70,5 +70,5 @@ install_packages() {
   fi
   packages+=("${EXTRA_PIP[@]}")
   ((${#packages[@]} > 0)) || return 0
-  run uv pip install --python "$VENV_DIR/bin/python" "${packages[@]}" -f https://storage.googleapis.com/libtpu-releases/index.html
+  run uv pip install --python "$VENV_DIR/bin/python" "${packages[@]}" -f https://storage.googleapis.com/libtpu-releases/index.html -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 }
