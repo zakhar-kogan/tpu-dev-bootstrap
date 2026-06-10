@@ -196,9 +196,10 @@ listen on `127.0.0.1` and refuse external connections.
 
 ### Public Jupyter
 
-The installer can bind JupyterLab to `0.0.0.0` with a generated token. It prints
-firewall commands to run from your laptop or Cloud Shell. Prefer restricting
-`--source-ranges` to your current IP/CIDR.
+The installer binds JupyterLab to `0.0.0.0` with a generated token by default.
+Firewall rules default to `0.0.0.0/0` (public, token-protected).
+
+To restrict access to a specific IP:
 
 ```bash
 ./install.sh --firewall-source 203.0.113.10/32
@@ -210,15 +211,6 @@ the command:
 ```bash
 ./install.sh --apply-firewall yes --firewall-source 203.0.113.10/32
 ```
-
-For a research group where the token URL should be reachable from anywhere:
-
-```bash
-./install.sh --public-jupyter yes --public-jupyter-open yes
-```
-
-This prints a firewall command with `--source-ranges 0.0.0.0/0`. It is public
-internet exposure, so rotate the token or stop the service when done.
 
 ## Package Groups
 
@@ -316,8 +308,9 @@ tpu-dev-bootstrap/
 
 - No hardcoded notebook password or token.
 - No wildcard CORS configuration.
-- Public Jupyter is token-protected, but still should be exposed only to trusted
-  IP ranges.
+- Public Jupyter and Marimo are token-protected.
+- Firewall defaults to `0.0.0.0/0` (public). Use `--firewall-source <IP>/32`
+  to restrict access to a specific IP.
 - Firewall rules are printed, not applied (unless `--apply-firewall yes`).
 - Re-running the installer reuses the environment; destructive rebuild requires
   `--recreate`.

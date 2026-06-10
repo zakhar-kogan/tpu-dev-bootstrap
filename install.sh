@@ -38,7 +38,7 @@ TORCH_VERSION="$DEFAULT_TORCH_VERSION"
 TORCH_XLA_VERSION="$DEFAULT_TORCH_XLA_VERSION"
 PRINT_FIREWALL_COMMAND="yes"
 APPLY_FIREWALL="no"
-FIREWALL_SOURCE_RANGE="auto"
+FIREWALL_SOURCE_RANGE="0.0.0.0/0"
 PUBLIC_JUPYTER_OPEN="no"
 PUBLIC_SSH_OPEN="no"
 APPLY_SSH_FIREWALL="no"
@@ -87,8 +87,8 @@ Options:
   --apt-packages PKG               Extra apt package. Repeatable.
   --torch-version VERSION          Default: 2.9.0.
   --torch-xla-version VERSION      Default: 2.9.0.
-  --firewall-source CIDR|auto      Source range for firewall rules. Default: auto.
-  --public-jupyter-open yes|no     Use 0.0.0.0/0 for public Jupyter. Default: no.
+  --firewall-source CIDR           Source range for firewall rules. Default: 0.0.0.0/0.
+  --public-jupyter-open yes|no     (Deprecated, now default.) Use 0.0.0.0/0 for Jupyter.
   --public-ssh-open yes|no         SSH firewall with 0.0.0.0/0. Default: no.
   --ssh-port PORT                  SSH port for firewall. Default: 22.
   --print-firewall-command yes|no  Print gcloud firewall command. Default: yes.

@@ -2,10 +2,8 @@
 # lib/firewall.sh — GCP firewall rule helpers (unified).
 
 detect_source_range() {
-  if [[ "$PUBLIC_JUPYTER_OPEN" == "yes" ]]; then
-    FIREWALL_SOURCE_RANGE="0.0.0.0/0"
-    return
-  fi
+  # Default is 0.0.0.0/0 (public, token-protected).
+  # Only auto-detect if user explicitly passes --firewall-source auto.
   if [[ "$FIREWALL_SOURCE_RANGE" != "auto" ]]; then
     return
   fi
@@ -85,13 +83,21 @@ EOF
     ensure_firewall_rule "allow-tpu-marimo-$MARIMO_PORT" "$MARIMO_PORT" "$FIREWALL_SOURCE_RANGE"
   fi
 
-  cat <<'EOF'
+  if [[ "$FIREWALL_SOURCE_RANGE" == "0.0.0.0/0" ]]; then
+    cat <<'EOF'
 
 Notes:
-  - 0.0.0.0/0 means public internet access.
-  - Use --public-jupyter-open yes only when you intentionally want that.
-  - For a private source range, pass --firewall-source <YOUR_IP>/32.
+  - Firewall is open to the public internet (0.0.0.0/0). Services are token-protected.
+  - To restrict access to a specific IP, pass --firewall-source <YOUR_IP>/32.
 EOF
+  else
+    cat <<EOF
+
+Notes:
+  - Firewall is restricted to $FIREWALL_SOURCE_RANGE.
+  - Omit --firewall-source to allow public access (default, token-protected).
+EOF
+  fi
 }
 
 print_ssh_firewall_commands() {
@@ -99,8 +105,6 @@ print_ssh_firewall_commands() {
   local ssh_source_range="$FIREWALL_SOURCE_RANGE"
   if [[ "$PUBLIC_SSH_OPEN" == "yes" ]]; then
     ssh_source_range="0.0.0.0/0"
-  elif [[ "$ssh_source_range" == "auto" ]]; then
-    ssh_source_range="<COLLABORATOR_IP_CIDR>"
   fi
 
   printf '\n🔑 SSH firewall\n'
