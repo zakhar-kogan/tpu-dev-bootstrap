@@ -11,8 +11,8 @@ DEFAULT_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}/tpu-dev"
 DEFAULT_JUPYTER_PORT="8888"
 DEFAULT_MARIMO_PORT="2718"
 DEFAULT_PACKAGE_GROUPS="core,tpu,general-ds,graphs,nlp,cayley-graphs"
-DEFAULT_TORCH_VERSION="2.9.0"
-DEFAULT_TORCH_XLA_VERSION="2.9.0"
+DEFAULT_TORCH_VERSION="2.4.1"
+DEFAULT_TORCH_XLA_VERSION="2.4.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "$SCRIPT_DIR" == "/" || ! -f "$SCRIPT_DIR/install.sh" ]]; then

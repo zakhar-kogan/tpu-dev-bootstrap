@@ -79,4 +79,36 @@ create_env() {
       log "Reusing existing venv (Python $actual_ver)"
     fi
   fi
+
+  # Dynamically retrieve python's library directory (LIBDIR)
+  local libdir
+  libdir="$("$VENV_DIR/bin/python" -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))" 2>/dev/null || true)"
+
+  # Create python-tpu launcher script and inject config into activator
+  if [[ "$DRY_RUN" != "yes" ]]; then
+    log "Creating python-tpu launcher"
+    cat << EOF > "$VENV_DIR/bin/python-tpu"
+#!/usr/bin/env bash
+export PJRT_DEVICE=TPU
+if [[ -n "$libdir" ]]; then
+  export LD_LIBRARY_PATH="$libdir:\${LD_LIBRARY_PATH:-}"
+fi
+exec "$VENV_DIR/bin/python" "\$@"
+EOF
+    chmod +x "$VENV_DIR/bin/python-tpu"
+
+    if [[ -f "$VENV_DIR/bin/activate" ]]; then
+      if ! grep -q "PJRT_DEVICE" "$VENV_DIR/bin/activate"; then
+        log "Injecting TPU environment variables into activate script"
+        cat << EOF >> "$VENV_DIR/bin/activate"
+
+# TPU Dev Bootstrap environment setup
+export PJRT_DEVICE=TPU
+if [[ -n "$libdir" ]]; then
+  export LD_LIBRARY_PATH="$libdir:\${LD_LIBRARY_PATH:-}"
+fi
+EOF
+      fi
+    fi
+  fi
 }

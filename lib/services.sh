@@ -85,6 +85,8 @@ install_jupyter_service() {
     allow_remote="True"
   fi
   log "Installing JupyterLab user service"
+  local libdir
+  libdir="$("$VENV_DIR/bin/python" -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))" 2>/dev/null || true)"
   local content
   content="$(render_template "$SCRIPT_DIR/systemd/jupyter.service.template" \
     ENV_DIR "$ENV_DIR" \
@@ -93,7 +95,8 @@ install_jupyter_service() {
     BIND_IP "$bind_ip" \
     JUPYTER_PORT "$JUPYTER_PORT" \
     JUPYTER_TOKEN "$JUPYTER_TOKEN" \
-    ALLOW_REMOTE_ACCESS "$allow_remote"
+    ALLOW_REMOTE_ACCESS "$allow_remote" \
+    LD_LIBRARY_PATH "$libdir"
   )"
   write_service "$SYSTEMD_USER_DIR/tpu-jupyter.service" "$content"
   enable_service "tpu-jupyter.service"
@@ -109,6 +112,8 @@ install_marimo_service() {
     bind_ip="0.0.0.0"
   fi
   log "Installing Marimo user service"
+  local libdir
+  libdir="$("$VENV_DIR/bin/python" -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))" 2>/dev/null || true)"
   local content
   content="$(render_template "$SCRIPT_DIR/systemd/marimo.service.template" \
     ENV_DIR "$ENV_DIR" \
@@ -116,7 +121,8 @@ install_marimo_service() {
     HOME "$HOME" \
     BIND_IP "$bind_ip" \
     MARIMO_PORT "$MARIMO_PORT" \
-    MARIMO_TOKEN "$MARIMO_TOKEN"
+    MARIMO_TOKEN "$MARIMO_TOKEN" \
+    LD_LIBRARY_PATH "$libdir"
   )"
   write_service "$SYSTEMD_USER_DIR/tpu-marimo.service" "$content"
   enable_service "tpu-marimo.service"

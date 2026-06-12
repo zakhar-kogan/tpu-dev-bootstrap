@@ -70,5 +70,5 @@ install_packages() {
   fi
   packages+=("${EXTRA_PIP[@]}")
   ((${#packages[@]} > 0)) || return 0
-  run uv pip install --python "$VENV_DIR/bin/python" "${packages[@]}" -f https://storage.googleapis.com/libtpu-releases/index.html
+  run uv pip install --prerelease=allow --python "$VENV_DIR/bin/python" "${packages[@]}" -f https://storage.googleapis.com/libtpu-releases/index.html
 }
